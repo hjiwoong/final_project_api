@@ -30,7 +30,7 @@ def student_to_dict(s: Student) -> dict:
 
 
 # ---------- 관리자 전용 ----------
-@router.post("/admin/students", status_code=201, dependencies=[Depends(require_admin)])
+@router.post("/web/students", status_code=201, dependencies=[Depends(require_admin)])
 def create_student(body: StudentCreate, db: Session = Depends(get_db)):
     s = Student(**body.model_dump())
     db.add(s)
@@ -39,7 +39,7 @@ def create_student(body: StudentCreate, db: Session = Depends(get_db)):
     return student_to_dict(s)
 
 
-@router.get("/admin/students", dependencies=[Depends(require_admin)])
+@router.get("/web/students", dependencies=[Depends(require_admin)])
 def list_students(db: Session = Depends(get_db)):
     return [student_to_dict(s) for s in db.query(Student).all()]
 

@@ -1,12 +1,12 @@
 """첫 관리자 계정 생성:  python seed_admin.py
-(/admin/users 가 관리자 전용이라 첫 관리자는 스크립트로 만듭니다)"""
+(/web/users 가 관리자 전용이라 첫 관리자는 스크립트로 만듭니다)"""
 import bcrypt
 
 from database.db_connection import SessionLocal
 from database.orm import init_db
 from models.models import User, UserRole
 
-EMAIL = "admin@school.kr"
+EMAIL = "web@school.kr"
 PASSWORD = "admin1234"     # 만든 뒤 꼭 바꾸세요
 NAME = "관리자"
 

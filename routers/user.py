@@ -62,7 +62,7 @@ def put_push_token(
 
 
 # ---------- 관리자 전용 ----------
-@router.post("/admin/users", status_code=201, dependencies=[Depends(require_admin)])
+@router.post("/web/users", status_code=201, dependencies=[Depends(require_admin)])
 def create_user(body: UserCreate, db: Session = Depends(get_db)):
     """email, password, name, role -> user"""
     if db.query(User).filter(User.email == body.email).first():
@@ -75,7 +75,7 @@ def create_user(body: UserCreate, db: Session = Depends(get_db)):
     return user_to_dict(u)
 
 
-@router.get("/admin/users", dependencies=[Depends(require_admin)])
+@router.get("/web/users", dependencies=[Depends(require_admin)])
 def list_users(role: UserRole | None = None, db: Session = Depends(get_db)):
     q = db.query(User)
     if role:

@@ -71,7 +71,7 @@ class User(Base):
     name = Column(String(100), nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.PARENT)
     push_token = Column(String(512), nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
 
     guardians = relationship("Guardian", back_populates="user")
     notifications = relationship("Notification", back_populates="user")
@@ -85,7 +85,7 @@ class Student(Base):
     name = Column(String(100), nullable=False)
     class_name = Column(String(50), nullable=True)      # 예: 1-2
     consent_at = Column(DateTime, nullable=True)        # 보호자 동의 시각
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
 
     guardians = relationship("Guardian", back_populates="student")
     bus_students = relationship("BusStudent", back_populates="student")
@@ -163,7 +163,7 @@ class Trip(Base):
     alighted_count = Column(Integer, nullable=True)     # 하차 수 = 승차 - 잔류
     confirm_method = Column(Enum(ConfirmMethod), nullable=True)
 
-    started_at = Column(DateTime, server_default=func.now())
+    started_at = Column(DateTime, default=datetime.now)
     ended_at = Column(DateTime, nullable=True)
 
     bus = relationship("Bus", back_populates="trips")
@@ -208,7 +208,7 @@ class Alert(Base):
     llm_summary = Column(Text, nullable=True)           # LLM 요약
     note = Column(Text, nullable=True)                  # 해결 시 조치 메모
 
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     acked_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
 

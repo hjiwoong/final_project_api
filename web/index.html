@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>통학버스 안전관리</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="login" class="login" hidden>
+  <form id="login-form" class="login-box" autocomplete="on">
+    <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span><span>통학버스 안전관리</span></div>
+    <p class="login-lead">관리자 계정으로 로그인하세요.</p>
+    <label>이메일<input name="email" type="email" autocomplete="username" required></label>
+    <label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
+    <p id="login-error" class="form-error" role="alert" hidden></p>
+    <button type="submit" class="btn primary">로그인</button>
+  </form>
+</section>
+
+<div id="app" class="app" hidden>
+  <aside class="rail">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>통학버스 안전관리</span></div>
+    <nav aria-label="주 메뉴">
+      <a href="#/dashboard" data-nav="dashboard">대시보드</a>
+      <a href="#/trips" data-nav="trips">운행</a>
+      <a href="#/alerts" data-nav="alerts">경고 <span id="nav-alert-count" class="count" hidden>0</span></a>
+      <a href="#/students" data-nav="students">학생·보호자</a>
+      <a href="#/buses" data-nav="buses">버스·배정</a>
+    </nav>
+    <div class="rail-foot">
+      <p class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="live-text">연결 중</span></p>
+      <p class="who"><span id="me-name"></span></p>
+      <button type="button" class="linkbtn" id="logout">로그아웃</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div id="banner" class="banner" role="alert" hidden></div>
+    <main id="view" tabindex="-1"></main>
+  </div>
+</div>
+
+<div id="toasts" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

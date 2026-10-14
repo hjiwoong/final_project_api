@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from database.db_connection import get_db
 from models.models import Bus, BusStudent, Student
 
-router = APIRouter(prefix="/admin/buses", tags=["관리-버스배정"])
+router = APIRouter(prefix="/web/buses", tags=["관리-버스배정"])
 
 
 class AssignStudent(BaseModel):

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from database.db_connection import get_db
 from models.models import Guardian, Student, User
 
-router = APIRouter(prefix="/admin/students", tags=["관리-보호자"])
+router = APIRouter(prefix="/web/students", tags=["관리-보호자"])
 
 
 class GuardianLink(BaseModel):
