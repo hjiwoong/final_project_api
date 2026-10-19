@@ -173,6 +173,17 @@ textarea { min-height: 5rem; resize: vertical; }
 .login-lead { margin: 0 0 1.25rem; color: var(--muted); }
 .login .btn { width: 100%; }
 
+/* ---------- 연결 요청 ---------- */
+.reqs { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+.req { background: var(--surface); border: 1px solid var(--line); border-left: 6px solid var(--yellow); border-radius: var(--radius); padding: 1rem 1.25rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+.req.done { border-left-color: var(--line); }
+.req h3 { margin: 0; font-size: 1.1rem; }
+.req .meta { color: var(--muted); font-size: .9rem; margin: .25rem 0 0; }
+.req-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .6rem; align-items: end; }
+.req-actions label { margin: 0; }
+.hint { display: block; color: var(--muted); font-size: .82rem; font-weight: 400; margin-top: .25rem; }
+@media (min-width: 1000px) { .req { grid-template-columns: 1fr 1.2fr 1.2fr; align-items: start; } .req.done { grid-template-columns: 1fr 1fr; } }
+
 /* ---------- toasts ---------- */
 #toasts { position: fixed; right: 1rem; bottom: 1rem; display: grid; gap: .5rem; z-index: 50; }
 .toast { background: var(--ink); color: #fff; padding: .7rem 1rem; border-radius: var(--radius); border-left: 6px solid #4cc58a; max-width: 340px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
@@ -269,3 +280,15 @@ input:focus, select:focus, textarea:focus { border-color: #526a87; outline: none
   .rail-foot { flex-wrap: wrap; }
   h1 { font-size: 1.5rem; }
 }
+
+/* ---------- 학생 관리 ---------- */
+.sub-lead { color: var(--muted); margin: -.75rem 0 1.25rem; max-width: 46rem; }
+.bulkbar { display: flex; flex-wrap: wrap; gap: .6rem; margin: 0 0 .75rem; }
+.btn.danger { color: var(--red); border-color: var(--red); }
+.btn.danger:hover { background: var(--red-bg); }
+td.rowact { white-space: nowrap; text-align: right; }
+td.rowact .btn + .btn { margin-left: .35rem; }
+.editbox { background: #fff; border: 1px solid var(--line); border-top: 4px solid var(--yellow); border-radius: var(--radius); padding: 1.1rem 1.3rem; margin-bottom: 1rem; }
+.editbox .inline { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 1rem; }
+form.filters input { min-width: 12rem; }
+input[type="checkbox"] { display: inline-block; width: 1.1rem; height: 1.1rem; min-height: 0; margin: 0; vertical-align: middle; accent-color: var(--ink); }

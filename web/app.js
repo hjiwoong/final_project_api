@@ -1,5 +1,5 @@
 /* 통학버스 안전관리 - 관리자 웹 (빌드 없는 단일 파일)
-   FastAPI 가 /web 으로 서빙하므로 API 와 같은 출처에서 동작한다. */
+   FastAPI 가 /admin 으로 서빙하므로 API 와 같은 출처에서 동작한다. */
 (() => {
   'use strict';
 
@@ -57,7 +57,7 @@
     if (token) headers.Authorization = `Bearer ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const res = await fetch(path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
-    if (res.status === 401 && token && !path.startsWith('/auth/')) {
+    if (res.status === 401 && token && path !== '/web/login') {
       logout('로그인이 만료되었습니다. 다시 로그인하세요.');
       throw new Error('unauthorized');
     }
@@ -67,7 +67,7 @@
     if (!res.ok) {
       const d = data && data.detail;
       const msg = typeof d === 'string' ? d
-        : Array.isArray(d) ? d.map((x) => x.msg).join(', ')
+        : Array.isArray(d) ? d.map((x) => x.msg.replace(/^Value error, /, '')).join(', ')
         : `요청에 실패했습니다 (${res.status})`;
       throw new Error(msg);
     }
@@ -88,6 +88,11 @@
   let dashSimulation = false;
   const tripsState = { result: '', status: '', offset: 0 };
   const alertsState = { status: 'OPEN', offset: 0 };
+  const reqState = { status: 'PENDING', offset: 0 };
+  const REQ_LIMIT = 10;
+  const rosterState = { q: '', class_name: '', offset: 0, edit: null };
+  const ROSTER_LIMIT = 20;
+  const REQ_STATUS = { PENDING: ['승인 대기', 'warn'], APPROVED: ['승인됨', 'ok'], REJECTED: ['거절됨', 'muted'] };
   const TRIP_LIMIT = 15;
   const ALERT_LIMIT = 15;
 
@@ -323,34 +328,125 @@
   }
 
   // ======================================================================
-  // 페이지: 학생·보호자
+  // 페이지: 연결 요청 (학부모가 신청한 자녀를 관리자가 확인해 학생에 연결)
+  // ======================================================================
+  async function pageRequests() {
+    const p = new URLSearchParams({ limit: REQ_LIMIT, offset: reqState.offset });
+    if (reqState.status) p.set('status', reqState.status);
+    const needStudents = !reqState.status || reqState.status === 'PENDING';
+    const [data, students] = await Promise.all([
+      api('/web/child-requests?' + p),
+      needStudents ? api('/web/students') : Promise.resolve([]),
+    ]);
+    const studentLabel = (s) => `${s.name}${s.class_name ? ` (${s.class_name})` : ' (반 없음)'}`;
+
+    const card = (r) => {
+      const who = `${esc(r.user.name)} (${esc(r.user.email)})`;
+      const head = `<div class="req-main">
+          <h3>${esc(r.child_name)} <span class="muted-text">${esc([r.class_name, r.relation].filter(Boolean).join(', '))}</span></h3>
+          <p class="meta">신청자 ${who}<br>${fmtTime(r.created_at)} 신청 ${badge(REQ_STATUS, r.status)}</p></div>`;
+      if (r.status !== 'PENDING') {
+        const tail = r.status === 'APPROVED'
+          ? `연결된 학생: ${r.student ? esc(studentLabel(r.student)) : '-'}`
+          : `거절 사유: ${esc(r.reject_reason || '(없음)')}`;
+        return `<li class="req done">${head}<p class="meta">${fmtTime(r.decided_at)} 처리<br>${tail}</p></li>`;
+      }
+      const exact = r.candidates.filter((c) => c.class_match);
+      const preselect = exact.length === 1 ? exact[0].id : '';       // 이름·반이 모두 맞는 학생이 딱 하나일 때만 미리 선택
+      const hint = r.candidates.length
+        ? `이름이 같은 학생: ${r.candidates.map((c) => esc(studentLabel(c))).join(', ')}`
+        : '이름이 같은 학생이 없습니다. 학생·보호자 화면에서 학생을 먼저 등록하세요.';
+      return `<li class="req">${head}
+        <form data-form="approve" class="req-actions" data-confirm="${esc(`${r.child_name}${r.class_name ? `(${r.class_name})` : ''} 학생을 ${r.user.name}님의 자녀로 연결합니다.\n신청자의 신원을 확인하셨나요?`)}">
+          <input type="hidden" name="id" value="${r.id}">
+          <label>연결할 학생<select name="student_id" required><option value="">선택</option>${options(students, (s) => s.id, studentLabel, preselect)}</select>
+            <span class="hint">${hint}</span></label>
+          <button type="submit" class="btn primary small">승인</button></form>
+        <form data-form="reject" class="req-actions">
+          <input type="hidden" name="id" value="${r.id}">
+          <label>거절 사유 (학부모에게 보입니다)<input name="reason" maxlength="200" placeholder="예: 학교 명단에서 찾을 수 없습니다"></label>
+          <button type="submit" class="btn small">거절</button></form></li>`;
+    };
+
+    return {
+      html: `<header class="pagehead"><div><h1>연결 요청</h1>
+          <p class="sub">학부모가 신청한 자녀를 확인하고 학생에 연결합니다. 승인하면 그 학부모가 해당 학생 버스의 경고를 받게 됩니다.</p></div></header>
+        <div class="filters"><label>상태<select data-filter="requests-status"><option value="">전체</option>${options(Object.entries(REQ_STATUS), (e) => e[0], (e) => e[1][0], reqState.status)}</select></label></div>
+        ${data.items.length ? `<ul class="reqs">${data.items.map(card).join('')}</ul>`
+          : `<p class="empty">${reqState.status === 'PENDING' ? '승인을 기다리는 요청이 없습니다.' : '조건에 맞는 요청이 없습니다.'}</p>`}
+        ${pager(data.total, reqState.offset, REQ_LIMIT, 'requests')}`,
+    };
+  }
+
+
+  // ======================================================================
+  // 페이지: 학생·보호자 (학생 등록 · 일괄 등록 · 수정 · 삭제/졸업 처리 + 보호자 계정/연결)
   // ======================================================================
   async function pageStudents() {
-    const [students, users] = await Promise.all([api('/web/students'), api('/web/users')]);
+    const p = new URLSearchParams({ limit: ROSTER_LIMIT, offset: rosterState.offset });
+    if (rosterState.q) p.set('q', rosterState.q);
+    if (rosterState.class_name) p.set('class_name', rosterState.class_name);
+    const [data, users, allStudents] = await Promise.all([
+      api('/web/student-roster?' + p), api('/web/users'), api('/web/students'),
+    ]);
     const parents = users.filter((u) => u.role === 'PARENT');
-    const guardians = await Promise.all(
-      students.map((s) => api('/web/students/' + s.id + '/guardians'))
-);
-    const rows = students.map((s, i) => `<tr><td>${esc(s.name)}</td><td>${esc(s.class_name || '-')}</td>
-      <td class="wrap">${guardians[i].length ? guardians[i].map((g) => `${esc(g.name)}${g.relation ? `(${esc(g.relation)})` : ''}`).join(', ') : '<span class="muted-text">연결된 보호자 없음</span>'}</td>
-      <td>${fmtDate(s.consent_at)}</td></tr>`).join('');
+    if (!data.items.length && rosterState.offset > 0) { rosterState.offset = 0; return pageStudents(); }
+    const editing = rosterState.edit ? data.items.find((s) => s.id === rosterState.edit) : null;
+    if (rosterState.edit && !editing) rosterState.edit = null;
+
+    const rows = data.items.map((s) => `<tr>
+      <td><input type="checkbox" data-sel value="${s.id}" aria-label="${esc(s.name)} 선택"></td>
+      <td>${esc(s.name)}</td><td>${esc(s.class_name || '-')}</td>
+      <td class="wrap">${s.guardians.length ? s.guardians.map((g) => `${esc(g.name)}${g.relation ? `(${esc(g.relation)})` : ''}`).join(', ') : '<span class="muted-text">연결된 보호자 없음</span>'}</td>
+      <td>${fmtDate(s.consent_at)}</td>
+      <td class="rowact"><button type="button" class="btn small" data-act="roster-edit" data-id="${s.id}">수정</button>
+        <button type="button" class="btn small danger" data-act="roster-del" data-id="${s.id}" data-name="${esc(s.name)}">삭제</button></td></tr>`).join('');
+
+    const classBtn = rosterState.class_name && rosterState.class_name !== '-' && !rosterState.q
+      ? `<button type="button" class="btn danger" data-act="roster-del-class" data-class="${esc(rosterState.class_name)}" data-total="${data.total}">${esc(rosterState.class_name)} 반 전체 삭제 (졸업 처리, ${data.total}명)</button>` : '';
+
+    const editBox = editing ? `<form data-form="rosterEdit" class="editbox">
+        <h2>학생 정보 수정</h2><input type="hidden" name="id" value="${editing.id}">
+        <div class="inline">
+          <label>이름<input name="name" required maxlength="100" value="${esc(editing.name)}"></label>
+          <label>반<input name="class_name" maxlength="50" value="${esc(editing.class_name || '')}" placeholder="예: 1-2"></label>
+        </div>
+        <button type="submit" class="btn primary">저장</button>
+        <button type="button" class="btn" data-act="roster-cancel">취소</button></form>` : '';
+
     return {
       html: `<header class="pagehead"><h1>학생·보호자</h1></header>
-        <div class="tablewrap"><table><thead><tr><th>이름</th><th>반</th><th>보호자</th><th>보호자 동의일</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="4" class="empty">등록된 학생이 없습니다. 아래에서 학생을 등록하세요.</td></tr>'}</tbody></table></div>
+        <p class="sub-lead">학생을 등록하고 졸업한 학생을 삭제합니다. 삭제하면 그 학생의 보호자 연결, 버스 배정, 출결 기록도 함께 지워집니다. 학부모 계정과 운행·경고 기록은 남습니다.</p>
+        <form data-form="rosterSearch" class="filters">
+          <label>이름 검색<input name="q" value="${esc(rosterState.q)}" placeholder="이름" maxlength="100"></label>
+          <label>반<select data-filter="roster-class"><option value="">전체</option><option value="-" ${rosterState.class_name === '-' ? 'selected' : ''}>반 없음</option>${options(data.classes, (c) => c, (c) => c, rosterState.class_name)}</select></label>
+          <button type="submit" class="btn">검색</button>
+        </form>
+        ${editBox}
+        <div class="bulkbar">
+          <button type="button" class="btn danger" data-act="roster-del-sel">선택한 학생 삭제</button>
+          ${classBtn}
+        </div>
+        <div class="tablewrap"><table><thead><tr><th><input type="checkbox" data-act="roster-selall" aria-label="이 페이지 전체 선택"></th><th>이름</th><th>반</th><th>보호자</th><th>보호자 동의일</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="empty">조건에 맞는 학생이 없습니다. 아래에서 학생을 등록하세요.</td></tr>'}</tbody></table></div>
+        ${pager(data.total, rosterState.offset, ROSTER_LIMIT, 'roster')}
         <section class="forms" aria-label="등록">
-          <form data-form="student"><h2>학생 등록</h2>
+          <form data-form="rosterAdd"><h2>학생 한 명 등록</h2>
             <label>이름<input name="name" required maxlength="100"></label>
             <label>반<input name="class_name" placeholder="예: 1-2" maxlength="50"></label>
             <label>보호자 동의일<input name="consent_at" type="date"></label>
             <button type="submit" class="btn primary">학생 등록</button></form>
+          <form data-form="rosterBulk"><h2>여러 명 한꺼번에 등록</h2>
+            <label>한 줄에 한 명씩 <span class="hint">이름, 반 (쉼표나 탭으로 구분). 엑셀에서 복사해 붙여넣어도 됩니다. 최대 500명</span>
+              <textarea name="lines" rows="8" placeholder="김하늘, 1-2&#10;이도윤, 3-1&#10;박서연, 2-3"></textarea></label>
+            <button type="submit" class="btn primary">일괄 등록</button></form>
           <form data-form="parent"><h2>보호자 계정 등록</h2>
             <label>이름<input name="name" required maxlength="100"></label>
             <label>이메일<input name="email" type="email" required></label>
-            <label>임시 비밀번호<input name="password" type="password" required minlength="4" autocomplete="new-password"></label>
+            <label>임시 비밀번호<input name="password" type="password" required minlength="4" autocomplete="new-password"><span class="hint">4자 이상, 영문 대문자와 특수문자를 포함하세요</span></label>
             <button type="submit" class="btn primary">보호자 계정 등록</button></form>
           <form data-form="guardian"><h2>보호자 연결</h2>
-            <label>학생<select name="student_id" required><option value="">선택</option>${options(students, (s) => s.id, (s) => `${s.name}${s.class_name ? ` (${s.class_name})` : ''}`)}</select></label>
+            <label>학생<select name="student_id" required><option value="">선택</option>${options(allStudents, (s) => s.id, (s) => `${s.name}${s.class_name ? ` (${s.class_name})` : ''}`)}</select></label>
             <label>보호자<select name="user_id" required><option value="">선택</option>${options(parents, (u) => u.id, (u) => `${u.name} ${u.email}`)}</select></label>
             <label>관계<input name="relation" placeholder="예: 모" maxlength="30"></label>
             <button type="submit" class="btn primary">보호자 연결</button></form>
@@ -411,6 +507,38 @@
       await api(`/web/buses/${f.bus_id}/students`, { method: 'POST', body: { student_id: Number(f.student_id) } });
       return '학생을 배정했습니다';
     },
+    async rosterSearch(f) {
+      rosterState.q = (f.q || '').trim(); rosterState.offset = 0;
+      return null;
+    },
+    async rosterAdd(f) {
+      const r = await api('/web/students/bulk', { method: 'POST', body: { students: [{ name: f.name, class_name: f.class_name || null, consent_at: f.consent_at ? `${f.consent_at}T00:00:00` : null }] } });
+      if (r.created === 0) throw new Error(r.skipped[0] ? r.skipped[0].reason : '등록하지 못했습니다');
+      return '학생을 등록했습니다';
+    },
+    async rosterBulk(f) {
+      const students = String(f.lines || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
+        const i = l.search(/[,\t]/);
+        return i < 0 ? { name: l, class_name: null } : { name: l.slice(0, i).trim(), class_name: l.slice(i + 1).trim() || null };
+      });
+      if (!students.length) throw new Error('등록할 학생을 입력하세요');
+      if (students.length > 500) throw new Error('한 번에 500명까지 등록할 수 있습니다');
+      const r = await api('/web/students/bulk', { method: 'POST', body: { students } });
+      return `${r.created}명 등록` + (r.skipped.length ? `, ${r.skipped.length}명은 이미 있어 건너뜀 (${r.skipped.slice(0, 3).map((x) => x.name).join(', ')}${r.skipped.length > 3 ? ' 외' : ''})` : '');
+    },
+    async rosterEdit(f) {
+      await api(`/web/students/${f.id}`, { method: 'PUT', body: { name: f.name, class_name: f.class_name || null } });
+      rosterState.edit = null;
+      return '학생 정보를 수정했습니다';
+    },
+    async approve(f) {
+      await api(`/web/child-requests/${f.id}/approve`, { method: 'POST', body: { student_id: Number(f.student_id) } });
+      return '자녀를 연결했습니다';
+    },
+    async reject(f) {
+      await api(`/web/child-requests/${f.id}/reject`, { method: 'POST', body: { reason: f.reason || null } });
+      return '요청을 거절했습니다';
+    },
     async resolve(f) {
       if (!['safety', 'simulation'].includes(f.resolve_mode)) {
         throw new Error('해결 방식을 선택해 주세요.');
@@ -439,11 +567,12 @@
     const form = e.target.closest('form[data-form]');
     if (!form) return;
     e.preventDefault();
+    if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) return;   // 되돌리기 어려운 처리는 한 번 더 확인
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true;
     try {
       const msg = await forms[form.dataset.form](Object.fromEntries(new FormData(form)));
-      toast(msg);
+      if (msg) toast(msg);
       await route();
       refreshBadge();
     } catch (err) {
@@ -466,13 +595,40 @@
       route();
     }
     else if (act === 'page') {
-      ({ trips: tripsState, alerts: alertsState })[el.dataset.key].offset = Number(el.dataset.offset);
+      ({ trips: tripsState, alerts: alertsState, requests: reqState, roster: rosterState })[el.dataset.key].offset = Number(el.dataset.offset);
       route();
     } else if (act === 'ack') {
       el.disabled = true;
       try { await api(`/alerts/${el.dataset.id}/ack`, { method: 'POST' }); toast('경고를 확인했습니다'); await route(); refreshBadge(); }
       catch (err) { if (err.message !== 'unauthorized') toast(err.message, 'error'); el.disabled = false; }
     } else if (act === 'close-banner') { $('#banner').hidden = true; }
+    else if (act === 'roster-edit') { rosterState.edit = Number(el.dataset.id); route(); }
+    else if (act === 'roster-cancel') { rosterState.edit = null; route(); }
+    else if (act === 'roster-selall') {
+      document.querySelectorAll('input[data-sel]').forEach((c) => { c.checked = el.checked; });
+    } else if (act === 'roster-del' || act === 'roster-del-sel' || act === 'roster-del-class') {
+      let body, msg;
+      if (act === 'roster-del') {
+        body = { ids: [Number(el.dataset.id)] };
+        msg = `${el.dataset.name} 학생을 삭제할까요?`;
+      } else if (act === 'roster-del-sel') {
+        const ids = [...document.querySelectorAll('input[data-sel]:checked')].map((c) => Number(c.value));
+        if (!ids.length) { toast('삭제할 학생을 먼저 선택하세요', 'error'); return; }
+        body = { ids };
+        msg = `선택한 ${ids.length}명을 삭제할까요?`;
+      } else {
+        body = { class_name: el.dataset.class };
+        msg = `${el.dataset.class} 반 학생 ${el.dataset.total}명을 모두 삭제(졸업 처리)할까요?`;
+      }
+      if (!window.confirm(`${msg}\n보호자 연결, 버스 배정, 출결 기록도 함께 삭제되며 되돌릴 수 없습니다.`)) return;
+      el.disabled = true;
+      try {
+        const r = await api('/web/students/bulk-delete', { method: 'POST', body });
+        toast(`${r.deleted}명을 삭제했습니다`);
+        rosterState.edit = null;
+        await route();
+      } catch (err) { if (err.message !== 'unauthorized') toast(err.message, 'error'); el.disabled = false; }
+    }
   });
 
   document.addEventListener('change', (e) => {
@@ -481,6 +637,8 @@
     if (k === 'trips-result') { tripsState.result = e.target.value; tripsState.offset = 0; }
     if (k === 'trips-status') { tripsState.status = e.target.value; tripsState.offset = 0; }
     if (k === 'alerts-status') { alertsState.status = e.target.value; alertsState.offset = 0; }
+    if (k === 'roster-class') { rosterState.class_name = e.target.value; rosterState.offset = 0; }
+    if (k === 'requests-status') { reqState.status = e.target.value; reqState.offset = 0; }
     route();
   });
 
@@ -493,6 +651,7 @@
     [/^#\/trips\/(\d+)$/, pageTripDetail, 'trips'],
     [/^#\/alerts$/, pageAlerts, 'alerts'],
     [/^#\/alerts\/(\d+)$/, pageAlertDetail, 'alerts'],
+    [/^#\/requests$/, pageRequests, 'requests'],
     [/^#\/students$/, pageStudents, 'students'],
     [/^#\/buses$/, pageBuses, 'buses'],
   ];
@@ -530,6 +689,7 @@
   let es = null;
   let retryTimer = null;
   let refreshTimer = null;
+  let badgeTimer = null;
 
   function setLive(on) {
     const el = $('#live');
@@ -546,6 +706,12 @@
       el.hidden = r.total === 0;
       document.title = (r.total ? `(${r.total}) ` : '') + '통학버스 안전관리';
     } catch { /* 배지는 실패해도 화면 사용에 지장 없음 */ }
+    try {
+      const q = await api('/web/child-requests?status=PENDING&limit=1');
+      const rel = $('#nav-request-count');
+      rel.textContent = q.total;
+      rel.hidden = q.total === 0;
+    } catch { /* 무시 */ }
   }
 
   function userIsTyping() {
@@ -600,6 +766,7 @@
     store.del(TOKEN_KEY); store.del(USER_KEY);
     if (es) { es.close(); es = null; }
     clearTimeout(retryTimer);
+    clearInterval(badgeTimer);
     showLogin(message);
   }
 
@@ -609,6 +776,8 @@
     $('#me-name').textContent = me ? me.name : '';
     connectLive();
     refreshBadge();
+    clearInterval(badgeTimer);
+    badgeTimer = setInterval(refreshBadge, 60000);     // 새 연결 요청은 실시간 알림이 없으므로 1분마다 확인
     route(true);
   }
 
@@ -618,7 +787,7 @@
     const f = Object.fromEntries(new FormData(e.target));
     btn.disabled = true;
     try {
-      const r = await api('/auth/login', { method: 'POST', body: { email: f.email, password: f.password } });
+      const r = await api('/web/login', { method: 'POST', body: { email: f.email, password: f.password } });
       if (r.role !== 'ADMIN') throw new Error('관리자 계정으로 로그인하세요. 학부모 계정은 이 화면을 쓸 수 없습니다.');
       token = r.access_token; me = r.user;
       store.set(TOKEN_KEY, token); store.set(USER_KEY, JSON.stringify(me));

@@ -12,8 +12,8 @@ from database.db_connection import get_db
 from database.orm import init_db
 from services.detector import MODE as DETECTOR_MODE
 from routers import (
-    alert, boarding_event, bus, bus_student, guardian,
-    notification, stats, student, trip, user,
+    alert, boarding_event, bus, bus_student, child_request, guardian,
+    notification, social, stats, student, student_admin, trip, user,
 )
 
 
@@ -42,6 +42,9 @@ app.include_router(trip.router)
 app.include_router(boarding_event.router)
 app.include_router(alert.router)
 app.include_router(notification.router)
+app.include_router(child_request.router)
+app.include_router(social.router)
+app.include_router(student_admin.router)
 app.include_router(stats.router)
 
 

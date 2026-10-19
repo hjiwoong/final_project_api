@@ -8,5 +8,5 @@ python-multipart
 bcrypt
 pydantic[email]
 pyjwt
-pillow
-ultralytics
+google-auth
+requests

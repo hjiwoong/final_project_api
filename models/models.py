@@ -60,6 +60,11 @@ class ConfirmMethod(str, enum.Enum):
     SCAN = "scan"
     BUTTON = "button"
 
+class ChildRequestStatus(str, enum.Enum):
+    PENDING = "PENDING"      # 관리자 승인 대기
+    APPROVED = "APPROVED"    # 승인됨 (guardians 에 연결됨)
+    REJECTED = "REJECTED"    # 거절됨
+
 
 # ---------- 계정 ----------
 class User(Base):
@@ -104,6 +109,43 @@ class Guardian(Base):
 
     user = relationship("User", back_populates="guardians")
     student = relationship("Student", back_populates="guardians")
+
+
+class SocialAccount(Base):
+    """구글 등 외부 로그인 연결 정보. 한 사용자에 여러 개, (provider, subject) 는 유일.
+    users 테이블을 고치지 않고 별도 테이블로 둬서 기존 DB 에 ALTER 없이 create_all 만으로 생성된다."""
+    __tablename__ = "social_accounts"
+    __table_args__ = (UniqueConstraint("provider", "subject", name="uq_social_provider_subject"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(20), nullable=False)       # "google"
+    subject = Column(String(255), nullable=False)       # 구글의 고유 사용자 ID(sub). 이메일은 바뀔 수 있어서 이걸로 식별
+    email = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class ChildRequest(Base):
+    """학부모가 '이 아이가 내 자녀'라고 신청한 연결 요청 (회원가입 때 / 앱에서 자녀 추가 때 공통).
+    관리자가 학생을 골라 승인하면 guardians 에 연결된다. 승인 전에는 그 아이의 알림을 받을 수 없다."""
+    __tablename__ = "child_requests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    child_name = Column(String(100), nullable=False)             # 학부모가 적은 자녀 이름
+    class_name = Column(String(50), nullable=True)               # 학부모가 적은 반
+    relation = Column(String(30), nullable=True)                 # 모/부/기타
+    status = Column(Enum(ChildRequestStatus), nullable=False, default=ChildRequestStatus.PENDING, index=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="SET NULL"), nullable=True)  # 승인 시 연결된 학생
+    reject_reason = Column(String(200), nullable=True)
+    decided_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    decided_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    student = relationship("Student", foreign_keys=[student_id])
 
 
 class Attendance(Base):
