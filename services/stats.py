@@ -56,9 +56,23 @@ def notify_delays_ms(db: Session, alerts: list[Alert]) -> list[float]:
     return delays
 
 
-def compute_summary(db: Session, from_: datetime | None, to: datetime | None) -> dict:
-    trips = _between(db.query(Trip), Trip.started_at, from_, to).all()
-    alerts = _between(db.query(Alert), Alert.created_at, from_, to).all()
+def compute_summary(
+    db: Session,
+    from_: datetime | None,
+    to: datetime | None,
+    simulation_mode: bool = False,
+) -> dict:
+    trips = _between(
+        db.query(Trip).filter(Trip.simulation_mode.is_(simulation_mode)),
+        Trip.started_at, from_, to
+    ).all()
+
+    alerts = _between(
+        db.query(Alert)
+        .join(Trip, Alert.trip_id == Trip.id)
+        .filter(Trip.simulation_mode.is_(simulation_mode)),
+        Alert.created_at, from_, to
+    ).all()
 
     delays = notify_delays_ms(db, alerts)
     avg_ms = round(sum(delays) / len(delays), 1) if delays else None

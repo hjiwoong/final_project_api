@@ -6,8 +6,8 @@ from database.db_connection import SessionLocal
 from database.orm import init_db
 from models.models import User, UserRole
 
-EMAIL = "web@school.kr"
-PASSWORD = "admin1234"     # 만든 뒤 꼭 바꾸세요
+EMAIL = "admin@test.com"
+PASSWORD = "adminID1!"     # 만든 뒤 꼭 바꾸세요
 NAME = "관리자"
 
 init_db()

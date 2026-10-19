@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from core.security import require_admin
 from database.db_connection import get_db
 from models.models import (
+    Alert, AlertStatus,
     Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod,
     EventType, Trip, TripResult, TripStatus, User,
 )
@@ -23,10 +24,13 @@ router = APIRouter(prefix="/trips", tags=["운행"], dependencies=[Depends(requi
 
 class TripStart(BaseModel):
     bus_id: int
+    simulation_mode: bool = False
 
 
 class ConfirmBody(BaseModel):
     method: ConfirmMethod = ConfirmMethod.BUTTON
+    safety_checked: bool = False
+    simulation_mode: bool = False
 
 
 # ---------- helpers ----------
@@ -75,7 +79,12 @@ def start_trip(body: TripStart, me: User = Depends(require_admin), db: Session =
     if running:
         raise HTTPException(409, f"이미 진행 중인 운행이 있습니다 (trip_id={running.id})")
 
-    t = Trip(bus_id=bus.id, driver_id=me.id, expected_count=expected_students(db, bus.id))
+    t = Trip(
+        bus_id=bus.id,
+        driver_id=me.id,
+        expected_count=expected_students(db, bus.id),
+        simulation_mode=body.simulation_mode,
+    )
     db.add(t)
     db.commit()
     db.refresh(t)
@@ -265,12 +274,60 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
     t = get_trip_or_404(db, trip_id)
     if t.status == TripStatus.CLOSED:
         raise HTTPException(409, "이미 종료된 운행입니다")
-    if t.result != TripResult.OK:
-        raise HTTPException(409, f"하차 확인이 완료되지 않아 종료할 수 없습니다 (result={t.result.value})")
 
-    t.status = TripStatus.CLOSED
-    t.confirm_method = body.method
-    t.ended_at = datetime.now()
-    db.commit()
-    return {"id": t.id, "status": t.status.value, "result": t.result.value,
-            "confirm_method": t.confirm_method.value, "ended_at": t.ended_at}
+    if body.simulation_mode != t.simulation_mode:
+        raise HTTPException(
+            status_code=400,
+            detail="운행 시작 시 설정한 시뮬레이션 모드와 종료 방식이 일치하지 않습니다."
+        )
+
+    if t.simulation_mode and body.safety_checked:
+        raise HTTPException(
+            status_code=400,
+            detail="시뮬레이션 운행은 실제 안전 확인 완료로 처리할 수 없습니다."
+        )
+
+    if not body.safety_checked and not body.simulation_mode:
+        raise HTTPException(
+            status_code=400,
+            detail="차량 내부 안전 확인 후 운행을 종료할 수 있습니다."
+        )
+
+    if t.boarding_count is None or t.remaining_count is None:
+        raise HTTPException(
+            status_code=409,
+            detail="승차 사진과 종점 사진이 모두 등록되어야 운행을 종료할 수 있습니다."
+        )
+
+    if t.result != TripResult.OK:
+        unresolved_alert = (
+            db.query(Alert)
+            .filter(
+                Alert.trip_id == trip_id,
+                Alert.status != AlertStatus.RESOLVED
+            )
+            .first()
+        )
+
+        if unresolved_alert:
+            raise HTTPException(
+                status_code=409,
+                detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다."
+            )
+
+        # 미하차 의심 경고가 모두 해결됐고
+        # 관리자가 안전 확인을 요청한 경우 종료 허용
+        t.status = TripStatus.CLOSED
+        t.confirm_method = body.method
+        # 시뮬레이션 여부는 운행 시작 시 결정하며 종료 시 변경하지 않는다.
+        t.ended_at = datetime.now()
+        db.commit()
+
+        return {
+            "id": t.id,
+            "status": t.status.value,
+            "result": t.result.value,
+            "confirm_method": t.confirm_method.value,
+            "ended_at": t.ended_at,
+        }
+

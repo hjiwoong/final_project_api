@@ -13,6 +13,7 @@ def trip_to_dict(t: Trip) -> dict:
         "driver_id": t.driver_id,
         "status": t.status.value,
         "result": t.result.value,
+        "simulation_mode": t.simulation_mode,
         "expected_count": t.expected_count,
         "boarding_count": t.boarding_count,
         "remaining_count": t.remaining_count,

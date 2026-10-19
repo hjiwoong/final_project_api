@@ -39,7 +39,10 @@
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 
   const RESULT = { OK: ['정상', 'ok'], MISSED: ['미하차 의심', 'bad'], NEEDS_CHECK: ['확인 필요', 'warn'], PENDING: ['대기', 'muted'] };
-  const TRIP_STATUS = { IN_PROGRESS: '진행 중', CLOSED: '종료' };
+  const TRIP_STATUS = {
+    IN_PROGRESS: ['진행 중', 'warn'],
+    CLOSED: ['종료', 'ok']
+  };
   const ALERT_STATUS = { OPEN: ['미확인', 'bad'], ACKED: ['확인함', 'warn'], RESOLVED: ['해결됨', 'ok'] };
   const LEVEL = { URGENT: ['긴급', 'bad'], CHECK: ['확인 필요', 'warn'] };
   const EVENT_LABEL = { BOARDING: '승차 사진', DROPOFF: '종점 사진', MISMATCH: '불일치 기록' };
@@ -82,6 +85,7 @@
 
   // ---------- 페이지 상태 ----------
   let dashPeriod = 'today';
+  let dashSimulation = false;
   const tripsState = { result: '', status: '', offset: 0 };
   const alertsState = { status: 'OPEN', offset: 0 };
   const TRIP_LIMIT = 15;
@@ -137,8 +141,15 @@
   async function pageDashboard() {
     const { from } = periodRange(dashPeriod);
     const [s, open] = await Promise.all([
-      api('/stats/summary' + (from ? `?from=${encodeURIComponent(from)}` : '')),
-      api('/alerts?status=OPEN&limit=5'),
+      api('/stats/summary?' + new URLSearchParams({
+        ...(from ? { from } : {}),
+        simulation_mode: String(dashSimulation)
+      })),
+      api('/alerts?' + new URLSearchParams({
+        status: 'OPEN',
+        limit: '5',
+        simulation_mode: String(dashSimulation)
+      })),
     ]);
     const unresolved = (s.alert_by_status.OPEN || 0) + (s.alert_by_status.ACKED || 0);
     const nd = s.notify_delay;
@@ -146,6 +157,13 @@
       ? '경고가 생기면 측정됩니다'
       : `목표 ${nd.target_ms / 1000}초 이내, ${nd.within_target ? '달성' : '초과'} (${nd.sample_count}건 기준)`;
     const periods = [['today', '오늘'], ['week', '최근 7일'], ['all', '전체']];
+    const simButtons = `
+      <div class="seg" aria-label="통계 구분">
+        <button type="button" class="${!dashSimulation ? 'active' : ''}"
+          data-dash-sim="false">실제 운행</button>
+        <button type="button" class="${dashSimulation ? 'active' : ''}"
+          data-dash-sim="true">시뮬레이션</button>
+      </div>`;
 
     const band = open.total > 0
       ? `<section class="alertband" aria-labelledby="ab-h"><h2 id="ab-h">확인이 필요한 경고 ${open.total}건</h2><ul>
@@ -157,6 +175,7 @@
       html: `<header class="pagehead"><h1>대시보드</h1>
         <div class="seg" role="group" aria-label="기간">${periods.map(([k, t]) =>
           `<button type="button" data-act="period" data-value="${k}" aria-pressed="${dashPeriod === k}">${t}</button>`).join('')}</div></header>
+        ${simButtons}
         ${band}
         <section aria-label="요약"><dl class="strip">
           <div><dt>운행</dt><dd><div class="val">${s.trip_count}<small>건</small></div><div class="note">정상 종료 ${s.closed_count}건, 진행 중 ${s.in_progress_count}건</div></dd></div>
@@ -179,7 +198,8 @@
     const rows = data.items.map((t) => `<tr>
       <td><a href="#/trips/${t.id}">${t.id}</a></td><td>${esc(t.bus_name || t.bus_id)}</td><td>${fmtTime(t.started_at)}</td>
       <td class="num">${num(t.boarding_count)}</td><td class="num">${num(t.remaining_count)}</td><td class="num">${num(t.alighted_count)}</td>
-      <td>${badge(RESULT, t.result)}</td><td>${esc(TRIP_STATUS[t.status] || t.status)}</td></tr>`).join('');
+      <td>${badge(RESULT, t.result)}</td>
+      <td>${badge(TRIP_STATUS, t.status)} ${t.simulation_mode === true ? '<span class="badge warn">시뮬레이션</span>' : ''}</td></tr>`).join('');
     return {
       html: `<header class="pagehead"><h1>운행</h1></header>
         <div class="filters">
@@ -211,7 +231,11 @@
       html: `<a class="back" href="#/trips">운행 목록</a>
         <header class="pagehead"><div><h1>${esc(t.bus_name || '버스')} 운행 #${t.id}</h1>
           <p class="sub">시작 ${fmtTime(t.started_at)}${t.ended_at ? `, 종료 ${fmtTime(t.ended_at)}` : ''}</p></div>
-          <div>${badge(RESULT, t.result)}</div></header>
+          <div>
+            ${badge(TRIP_STATUS, t.status)}
+            ${badge(RESULT, t.result)}
+            ${t.simulation_mode === true ? '<span class="badge warn">시뮬레이션</span>' : ''}
+          </div></header>
         <dl class="facts">
           <div><dt>탑승 예정</dt><dd>${num(t.expected_count)}</dd></div><div><dt>승차</dt><dd>${num(t.boarding_count)}</dd></div>
           <div><dt>종점 잔류</dt><dd>${num(t.remaining_count)}</dd></div><div><dt>하차</dt><dd>${num(t.alighted_count)}</dd></div>
@@ -262,6 +286,13 @@
     const resolveForm = `<form data-form="resolve" class="resolve">
       <input type="hidden" name="id" value="${a.id}">
       <label>조치 메모<textarea name="note" id="note" placeholder="예: 차량 확인 후 아이를 발견해 보호자에게 인계했습니다"></textarea></label>
+      <label>해결 방식
+        <select name="resolve_mode" required>
+          <option value="">해결 방식 선택</option>
+          <option value="safety">실제 차량 내부 안전 확인 완료</option>
+          <option value="simulation">시뮬레이션 테스트 (실제 안전 확인 아님)</option>
+        </select>
+      </label>    
       <button type="submit" class="btn primary">해결 처리</button></form>`;
 
     return {
@@ -279,7 +310,14 @@
         ${a.status === 'RESOLVED' ? '' : `<section><h2>조치</h2><div class="actions">
           ${a.status === 'OPEN' ? `<button type="button" class="btn alert" data-act="ack" data-id="${a.id}">경고 확인</button>` : ''}
           ${resolveForm}</div></section>`}
-        ${a.event ? `<section><h2>근거 사진</h2>${eventList([a.event])}</section>` : ''}`,
+        ${a.event ? `<section><h2>근거 사진</h2>
+          ${eventList([a.event])}
+          <img
+            src="${imgUrl(a.event.id)}"
+            alt="미하차 의심 근거 사진"
+            style="max-width:400px;width:100%;border-radius:8px;margin-top:12px;"
+          >
+        </section>` : ''}`,
       after: fixImages,
     };
   }
@@ -290,7 +328,9 @@
   async function pageStudents() {
     const [students, users] = await Promise.all([api('/web/students'), api('/web/users')]);
     const parents = users.filter((u) => u.role === 'PARENT');
-    const guardians = await Promise.all(students.map((s) => api(`/admin/students/${s.id}/guardians`)));
+    const guardians = await Promise.all(
+      students.map((s) => api('/web/students/' + s.id + '/guardians'))
+);
     const rows = students.map((s, i) => `<tr><td>${esc(s.name)}</td><td>${esc(s.class_name || '-')}</td>
       <td class="wrap">${guardians[i].length ? guardians[i].map((g) => `${esc(g.name)}${g.relation ? `(${esc(g.relation)})` : ''}`).join(', ') : '<span class="muted-text">연결된 보호자 없음</span>'}</td>
       <td>${fmtDate(s.consent_at)}</td></tr>`).join('');
@@ -325,7 +365,7 @@
     const [buses, users, students] = await Promise.all([api('/web/buses'), api('/web/users'), api('/web/students')]);
     const admins = users.filter((u) => u.role === 'ADMIN');
     const driverName = (id) => (admins.find((u) => u.id === id) || {}).name || '-';
-    const assigned = await Promise.all(buses.map((b) => api(`/admin/buses/${b.id}/students`)));
+    const assigned = await Promise.all(buses.map((b) => api(`/web/buses/${b.id}/students`)));
     const rows = buses.map((b, i) => `<tr><td>${esc(b.name)}</td><td>${esc(b.plate_no)}</td><td>${esc(driverName(b.driver_id))}</td>
       <td class="num">${b.student_count}</td>
       <td class="wrap">${assigned[i].length ? assigned[i].map((s) => esc(s.name)).join(', ') : '<span class="muted-text">배정된 학생 없음</span>'}</td></tr>`).join('');
@@ -360,7 +400,7 @@
       return '보호자 계정을 등록했습니다';
     },
     async guardian(f) {
-      await api(`/admin/students/${f.student_id}/guardians`, { method: 'POST', body: { user_id: Number(f.user_id), relation: f.relation || null } });
+      await api(`/web/students/${f.student_id}/guardians`, { method: 'POST', body: { user_id: Number(f.user_id), relation: f.relation || null } });
       return '보호자를 연결했습니다';
     },
     async bus(f) {
@@ -368,11 +408,29 @@
       return '버스를 등록했습니다';
     },
     async assign(f) {
-      await api(`/admin/buses/${f.bus_id}/students`, { method: 'POST', body: { student_id: Number(f.student_id) } });
+      await api(`/web/buses/${f.bus_id}/students`, { method: 'POST', body: { student_id: Number(f.student_id) } });
       return '학생을 배정했습니다';
     },
     async resolve(f) {
-      await api(`/alerts/${f.id}/resolve`, { method: 'POST', body: { note: f.note || null } });
+      if (!['safety', 'simulation'].includes(f.resolve_mode)) {
+        throw new Error('해결 방식을 선택해 주세요.');
+      }
+
+      const simulation = f.resolve_mode === 'simulation';
+
+      const note = simulation
+        ? `[시뮬레이션] ${f.note || 'AI 생성 이미지 기반 테스트. 실제 차량 내부 안전 확인 없음.'}`
+        : f.note || '실제 차량 내부 안전 확인 완료';
+
+      await api(`/alerts/${f.id}/resolve`, {
+        method: 'POST',
+        body: {
+          note: note,
+          safety_checked: !simulation,
+          simulation_mode: simulation
+        }
+      });
+
       return '경고를 해결 처리했습니다';
     },
   };
@@ -397,10 +455,16 @@
 
   // ---------- 클릭 / 선택 위임 ----------
   document.addEventListener('click', async (e) => {
-    const el = e.target.closest('[data-act]');
+    const el = e.target.closest('[data-act], [data-dash-sim]');
     if (!el) return;
-    const act = el.dataset.act;
-    if (act === 'period') { dashPeriod = el.dataset.value; route(); }
+    const act = el.dataset.dashSim !== undefined ? 'dash-sim' : el.dataset.act;
+    if (act === 'period') {
+      dashPeriod = el.dataset.value;
+      route();
+    } else if (act === 'dash-sim') {
+      dashSimulation = el.dataset.dashSim === 'true';
+      route();
+    }
     else if (act === 'page') {
       ({ trips: tripsState, alerts: alertsState })[el.dataset.key].offset = Number(el.dataset.offset);
       route();

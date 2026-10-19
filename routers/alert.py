@@ -20,6 +20,8 @@ router = APIRouter(tags=["경고"])
 
 class ResolveBody(BaseModel):
     note: str | None = None
+    safety_checked: bool = False
+    simulation_mode: bool = False
 
 
 def get_alert_or_404(db: Session, alert_id: int) -> Alert:
@@ -34,6 +36,7 @@ def get_alert_or_404(db: Session, alert_id: int) -> Alert:
 def list_alerts(
     status: AlertStatus | None = None,
     level: AlertLevel | None = None,
+    simulation_mode: bool | None = None,
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -43,6 +46,8 @@ def list_alerts(
         q = q.filter(Alert.status == status)
     if level:
         q = q.filter(Alert.level == level)
+    if simulation_mode is not None:
+        q = q.join(Trip, Alert.trip_id == Trip.id).filter(Trip.simulation_mode == simulation_mode)
     total = q.count()
     rows = q.order_by(Alert.id.desc()).offset(offset).limit(limit).all()
     return {"items": [alert_to_dict(a) for a in rows], "total": total}
@@ -78,6 +83,25 @@ def ack_alert(alert_id: int, db: Session = Depends(get_db)):
 def resolve_alert(alert_id: int, body: ResolveBody, db: Session = Depends(get_db)):
     """ACKED(또는 OPEN) -> RESOLVED, 조치 메모 기록"""
     a = get_alert_or_404(db, alert_id)
+
+    if body.simulation_mode and not a.trip.simulation_mode:
+        raise HTTPException(
+            status_code=400,
+            detail="시뮬레이션 운행의 경고만 시뮬레이션 방식으로 해결할 수 있습니다."
+        )
+
+    if a.trip.simulation_mode and body.safety_checked:
+        raise HTTPException(
+            status_code=400,
+            detail="시뮬레이션 운행의 경고는 실제 안전 확인 완료로 처리할 수 없습니다."
+        )
+
+    if not body.safety_checked and not body.simulation_mode:
+        raise HTTPException(
+            status_code=400,
+            detail="차량 내부 안전 확인 후 경고를 해결할 수 있습니다."
+        )
+
     if a.status == AlertStatus.RESOLVED:
         raise HTTPException(409, "이미 해결된 경고입니다")
     now = datetime.now()

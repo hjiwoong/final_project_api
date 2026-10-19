@@ -162,6 +162,7 @@ class Trip(Base):
     remaining_count = Column(Integer, nullable=True)    # 종점 잔류 수
     alighted_count = Column(Integer, nullable=True)     # 하차 수 = 승차 - 잔류
     confirm_method = Column(Enum(ConfirmMethod), nullable=True)
+    simulation_mode = Column(Boolean, nullable=False, default=False)
 
     started_at = Column(DateTime, default=datetime.now)
     ended_at = Column(DateTime, nullable=True)
