@@ -17,3 +17,11 @@ data/raw/
 mlruns/
 mlartifacts/
 mlflow.db
+
+# Local uploads and backups
+uploads/
+web/app_backup.js
+web/style_backup.css
+
+# Local YOLO model
+yolov8n.pt
