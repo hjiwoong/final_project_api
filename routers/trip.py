@@ -110,6 +110,7 @@ def list_trips(
     status: TripStatus | None = None,
     result: TripResult | None = None,
     bus_id: int | None = None,
+    simulation_mode: bool | None = None,
     from_: datetime | None = Query(None, alias="from"),
     to: datetime | None = None,
     limit: int = Query(20, ge=1, le=200),
@@ -117,6 +118,8 @@ def list_trips(
     db: Session = Depends(get_db),
 ):
     q = db.query(Trip)
+    if simulation_mode is not None:
+        q = q.filter(Trip.simulation_mode == simulation_mode)
     if status:
         q = q.filter(Trip.status == status)
     if result:

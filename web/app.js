@@ -86,8 +86,17 @@
   // ---------- 페이지 상태 ----------
   let dashPeriod = 'today';
   let dashSimulation = false;
-  const tripsState = { result: '', status: '', offset: 0 };
-  const alertsState = { status: 'OPEN', offset: 0 };
+  const tripsState = {
+    result: '',
+    status: '',
+    offset: 0,
+    simulation: false
+  };
+  const alertsState = {
+    status: 'OPEN',
+    offset: 0,
+    simulation: false
+  };
   const reqState = { status: 'PENDING', offset: 0 };
   const REQ_LIMIT = 10;
   const rosterState = { q: '', class_name: '', offset: 0, edit: null };
@@ -199,6 +208,7 @@
     const p = new URLSearchParams({ limit: TRIP_LIMIT, offset: tripsState.offset });
     if (tripsState.result) p.set('result', tripsState.result);
     if (tripsState.status) p.set('status', tripsState.status);
+    p.set('simulation_mode', String(tripsState.simulation));
     const data = await api('/trips?' + p);
     const rows = data.items.map((t) => `<tr>
       <td><a href="#/trips/${t.id}">${t.id}</a></td><td>${esc(t.bus_name || t.bus_id)}</td><td>${fmtTime(t.started_at)}</td>
@@ -207,6 +217,16 @@
       <td>${badge(TRIP_STATUS, t.status)} ${t.simulation_mode === true ? '<span class="badge warn">시뮬레이션</span>' : ''}</td></tr>`).join('');
     return {
       html: `<header class="pagehead"><h1>운행</h1></header>
+        <div class="seg" aria-label="운행 구분">
+          <button type="button"
+            class="${!tripsState.simulation ? 'active' : ''}"
+            data-act="trips-simulation"
+            data-simulation="false">실제 운행</button>
+          <button type="button"
+            class="${tripsState.simulation ? 'active' : ''}"
+            data-act="trips-simulation"
+            data-simulation="true">시뮬레이션</button>
+        </div>
         <div class="filters">
           <label>결과<select data-filter="trips-result"><option value="">전체</option>${options(Object.entries(RESULT), (e) => e[0], (e) => e[1][0], tripsState.result)}</select></label>
           <label>상태<select data-filter="trips-status"><option value="">전체</option>${options(Object.entries(TRIP_STATUS), (e) => e[0], (e) => e[1], tripsState.status)}</select></label>
@@ -268,12 +288,23 @@
   async function pageAlerts() {
     const p = new URLSearchParams({ limit: ALERT_LIMIT, offset: alertsState.offset });
     if (alertsState.status) p.set('status', alertsState.status);
+    p.set('simulation_mode', String(alertsState.simulation));
     const data = await api('/alerts?' + p);
     const rows = data.items.map((a) => `<tr>
       <td>${badge(LEVEL, a.level)}</td><td><a href="#/alerts/${a.id}">${esc(a.message)}</a></td><td>${esc(a.bus_name || '-')}</td>
       <td>${badge(ALERT_STATUS, a.status)}</td><td>${fmtTime(a.created_at)}</td></tr>`).join('');
     return {
       html: `<header class="pagehead"><h1>경고</h1></header>
+        <div class="seg" aria-label="운행 구분">
+          <button type="button"
+            class="${!alertsState.simulation ? 'active' : ''}"
+            data-act="alerts-simulation"
+            data-simulation="false">실제 운행</button>
+          <button type="button"
+            class="${alertsState.simulation ? 'active' : ''}"
+            data-act="alerts-simulation"
+            data-simulation="true">시뮬레이션</button>
+        </div>
         <div class="filters"><label>상태<select data-filter="alerts-status"><option value="">전체</option>${options(Object.entries(ALERT_STATUS), (e) => e[0], (e) => e[1][0], alertsState.status)}</select></label></div>
         <div class="tablewrap"><table><thead><tr><th>수준</th><th>내용</th><th>버스</th><th>상태</th><th>발생</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="empty">조건에 맞는 경고가 없습니다.</td></tr>'}</tbody></table></div>
@@ -593,8 +624,15 @@
     } else if (act === 'dash-sim') {
       dashSimulation = el.dataset.dashSim === 'true';
       route();
-    }
-    else if (act === 'page') {
+    } else if (act === 'alerts-simulation') {
+      alertsState.simulation = el.dataset.simulation === 'true';
+      alertsState.offset = 0;
+      route();
+    } else if (act === 'trips-simulation') {
+      tripsState.simulation = el.dataset.simulation === 'true';
+      tripsState.offset = 0;
+      route();
+    } else if (act === 'page') {
       ({ trips: tripsState, alerts: alertsState, requests: reqState, roster: rosterState })[el.dataset.key].offset = Number(el.dataset.offset);
       route();
     } else if (act === 'ack') {
