@@ -129,32 +129,80 @@
   }
 
   function chartSvg(daily) {
-    if (!daily.length) return '<p class="empty">이 기간에 운행 기록이 없습니다.</p>';
-    const H = 190, top = 26, bottom = 34, side = 8, bw = 18;
-    const W = Math.max(520, daily.length * 70);
-    const max = Math.max(1, ...daily.flatMap((d) => [d.trips, d.alerts]));
+    if (!daily.length) {
+      return '<p class="empty">이 기간에 운행 기록이 없습니다.</p>';
+    }
+
+    const W = 1000;
+    const H = 260;
+    const top = 35;
+    const bottom = 45;
+    const side = 55;
+    const bw = 24;
+
+    const max = Math.max(
+      1,
+      ...daily.flatMap(d => [d.trips, d.alerts])
+    );
+
     const plotH = H - top - bottom;
     const slot = (W - side * 2) / daily.length;
+
     let out = '';
+
     daily.forEach((d, i) => {
       const cx = side + slot * i + slot / 2;
-      const bar = (v, x, cls) => {
-        const h = (v / max) * plotH;
+
+      const bar = (value, x, cls) => {
+        const h = (value / max) * plotH;
         const y = H - bottom - h;
-        return `${v > 0 ? `<rect class="${cls}" x="${x}" y="${y}" width="${bw}" height="${h}" rx="2"/>` : ''}
-          <text x="${x + bw / 2}" y="${y - 5}" text-anchor="middle">${v}</text>`;
+
+        return `
+          ${value > 0 ? `
+            <rect class="${cls}"
+              x="${x}" y="${y}"
+              width="${bw}" height="${h}" rx="4"/>
+          ` : ''}
+          <text x="${x + bw / 2}"
+            y="${y - 9}"
+            text-anchor="middle"
+            font-size="13">${value}</text>
+        `;
       };
-      out += bar(d.trips, cx - bw - 2, 'bar-trip') + bar(d.alerts, cx + 2, 'bar-alert');
-      out += `<text x="${cx}" y="${H - 12}" text-anchor="middle">${esc(d.date.slice(5).replace('-', '.'))}</text>`;
+
+      out += bar(d.trips, cx - bw - 4, 'bar-trip');
+      out += bar(d.alerts, cx + 4, 'bar-alert');
+
+      out += `
+        <text x="${cx}" y="${H - 15}"
+          text-anchor="middle"
+          font-size="13">
+          ${esc(d.date.slice(5).replace('-', '.'))}
+        </text>
+      `;
     });
-    return `<div class="legend"><span><i style="background:var(--slate)"></i>운행</span><span><i style="background:var(--red)"></i>경고</span></div>
-      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="일별 운행 수와 경고 수 막대 그래프" style="width:${W}px;max-width:none">${out}
-      <line x1="${side}" x2="${W - side}" y1="${H - bottom}" y2="${H - bottom}" stroke="#d8dee4"/></svg>`;
+
+    return `
+      <div class="legend">
+        <span><i style="background:var(--slate)"></i>운행</span>
+        <span><i style="background:var(--red)"></i>경고</span>
+      </div>
+      <svg viewBox="0 0 ${W} ${H}"
+        role="img"
+        aria-label="일별 운행 수와 경고 수 막대 그래프"
+        style="width:100%;height:260px;display:block"
+        preserveAspectRatio="xMidYMid meet">
+        ${out}
+        <line x1="${side}" x2="${W - side}"
+          y1="${H - bottom}" y2="${H - bottom}"
+          stroke="#d8dee4"/>
+      </svg>
+    `;
   }
 
   async function pageDashboard() {
     const { from } = periodRange(dashPeriod);
-    const [s, open] = await Promise.all([
+    const [s, open, trips, alerts, buses] = await Promise.all([
       api('/stats/summary?' + new URLSearchParams({
         ...(from ? { from } : {}),
         simulation_mode: String(dashSimulation)
@@ -164,6 +212,17 @@
         limit: '5',
         simulation_mode: String(dashSimulation)
       })),
+      api('/trips?' + new URLSearchParams({
+        limit: '100',
+        ...(from ? { from } : {}),
+        simulation_mode: String(dashSimulation)
+      })),
+      api('/alerts?' + new URLSearchParams({
+        limit: '5',
+        ...(from ? { from } : {}),
+        simulation_mode: String(dashSimulation)
+      })),
+      api('/web/buses'),
     ]);
     const unresolved = (s.alert_by_status.OPEN || 0) + (s.alert_by_status.ACKED || 0);
     const nd = s.notify_delay;
@@ -197,7 +256,98 @@
           <div><dt>경고</dt><dd><div class="val">${s.alert_count}<small>건</small></div><div class="note">아직 해결되지 않은 경고 ${unresolved}건</div></dd></div>
           <div><dt>사진 수신 후 알림까지</dt><dd><div class="val">${fmtMs(nd.avg_ms)}</div><div class="note">${esc(delayNote)}</div></dd></div>
         </dl></section>
-        <section><h2>일별 운행과 경고</h2><div class="chartwrap">${chartSvg(s.daily)}</div></section>`,
+        <section>
+          <h2>일별 운행과 경고</h2>
+          <div class="chartwrap">${chartSvg(s.daily)}</div>
+        </section>
+        <section class="bus-overview">
+          <div class="dashboard-panel-head">
+            <h2>차량별 운행 현황</h2>
+            <a href="#/buses">차량 관리 →</a>
+          </div>
+        
+          <div class="bus-overview-grid">
+            ${buses.map(b => {
+              const recentTrip = (trips.items || []).find(t => t.bus_id === b.id);
+        
+              const status = recentTrip?.status === 'IN_PROGRESS'
+                ? '운행 중'
+                : recentTrip
+                  ? '운행 종료'
+                  : '해당 기간 운행 기록 없음';
+              
+              const statusClass = recentTrip?.status === 'IN_PROGRESS'
+                ? 'running'
+                : recentTrip
+                  ? 'closed'
+                  : 'idle';
+        
+              return `
+                <div class="bus-overview-card">
+                  <div class="bus-overview-title">
+                    <span>🚌</span>
+                    <strong>${esc(b.name)}</strong>
+                  </div>
+        
+                  <p class="bus-overview-plate">${esc(b.plate_no || '-')}</p>
+        
+                  <div class="bus-overview-info">
+                    <span>배정 학생</span>
+                    <strong>${b.student_count ?? 0}명</strong>
+                  </div>
+        
+                  <div class="bus-overview-info">
+                    <span>운행 상태</span>
+                    <strong class="bus-status ${statusClass}">${status}</strong>
+                  </div>
+        
+                  <div class="bus-overview-info">
+                    <span>최근 운행</span>
+                    <strong>${recentTrip ? fmtTime(recentTrip.started_at) : '-'}</strong>
+                  </div>
+                </div>
+              `;
+            }).join('') || '<p class="empty">등록된 차량이 없습니다.</p>'}
+          </div>
+        </section>
+        
+        <div class="dashboard-lists">
+          <section class="dashboard-panel">
+            <div class="dashboard-panel-head">
+              <h2>최근 운행</h2>
+              <a href="#/trips">전체 보기 →</a>
+            </div>
+            <div class="dashboard-items">
+              ${(trips.items || []).map(t => `
+                <a class="dashboard-item" href="#/trips/${t.id}">
+                  <div>
+                    <strong>${esc(t.bus_name || '차량 정보 없음')}</strong>
+                    <small>${fmtTime(t.started_at)}</small>
+                  </div>
+                  <span>${esc(t.status || '-')}</span>
+                </a>
+              `).join('') || '<p class="empty">운행 기록이 없습니다.</p>'}
+            </div>
+          </section>
+        
+          <section class="dashboard-panel">
+            <div class="dashboard-panel-head">
+              <h2>최근 경고</h2>
+              <a href="#/alerts">전체 보기 →</a>
+            </div>
+            <div class="dashboard-items">
+              ${(alerts.items || []).map(a => `
+                <a class="dashboard-item" href="#/alerts/${a.id}">
+                  <div>
+                    <strong>${esc(a.message || '경고 발생')}</strong>
+                    <small>${esc(a.bus_name || '-')} · ${fmtTime(a.created_at)}</small>
+                  </div>
+                  <span>${esc(a.level || '-')}</span>
+                </a>
+              `).join('') || '<p class="empty">경고 기록이 없습니다.</p>'}
+            </div>
+          </section>
+        </div>`,
     };
   }
 
@@ -209,14 +359,58 @@
     if (tripsState.result) p.set('result', tripsState.result);
     if (tripsState.status) p.set('status', tripsState.status);
     p.set('simulation_mode', String(tripsState.simulation));
-    const data = await api('/trips?' + p);
+    const [data, summary] = await Promise.all([
+      api('/trips?' + p),
+      api('/stats/summary?' + new URLSearchParams({
+        simulation_mode: String(tripsState.simulation)
+      }))
+    ]);
+
+    const tripStats = [
+      {
+        label: '전체 운행',
+        value: summary.trip_count,
+        note: '선택한 운행 유형 기준'
+      },
+      {
+        label: '미하차 의심',
+        value: summary.result_counts.MISSED || 0,
+        note: '안전 확인이 필요한 운행',
+        danger: true
+      },
+      {
+        label: '진행 중',
+        value: summary.in_progress_count,
+        note: '현재 진행 중인 운행'
+      }
+    ];
     const rows = data.items.map((t) => `<tr>
       <td><a href="#/trips/${t.id}">${t.id}</a></td><td>${esc(t.bus_name || t.bus_id)}</td><td>${fmtTime(t.started_at)}</td>
       <td class="num">${num(t.boarding_count)}</td><td class="num">${num(t.remaining_count)}</td><td class="num">${num(t.alighted_count)}</td>
       <td>${badge(RESULT, t.result)}</td>
-      <td>${badge(TRIP_STATUS, t.status)} ${t.simulation_mode === true ? '<span class="badge warn">시뮬레이션</span>' : ''}</td></tr>`).join('');
+      <td>${badge(TRIP_STATUS, t.status)} ${t.simulation_mode === true ? '<span class="badge warn">시뮬레이션</span>' : ''}</td>
+      <td>
+        <a class="trip-detail-btn" href="#/trips/${t.id}">상세 보기 →</a>
+      </td></tr>`).join('');
     return {
-      html: `<header class="pagehead"><h1>운행</h1></header>
+      html: `<header class="pagehead">
+          <div>
+            <h1>운행 관리</h1>
+            <p class="sub">차량 운행 기록과 안전 상태를 한눈에 확인합니다.</p>
+          </div>
+        </header>
+      
+        <div class="trip-summary">
+          ${tripStats.map(stat => `
+            <div class="trip-summary-card">
+              <span class="trip-summary-label">${stat.label}</span>
+              <strong class="trip-summary-value ${stat.danger ? 'danger' : ''}">
+                ${stat.value}<small>건</small>
+              </strong>
+              <span class="trip-summary-note">${stat.note}</span>
+            </div>
+          `).join('')}
+        </div>
         <div class="seg" aria-label="운행 구분">
           <button type="button"
             class="${!tripsState.simulation ? 'active' : ''}"
@@ -231,8 +425,8 @@
           <label>결과<select data-filter="trips-result"><option value="">전체</option>${options(Object.entries(RESULT), (e) => e[0], (e) => e[1][0], tripsState.result)}</select></label>
           <label>상태<select data-filter="trips-status"><option value="">전체</option>${options(Object.entries(TRIP_STATUS), (e) => e[0], (e) => e[1], tripsState.status)}</select></label>
         </div>
-        <div class="tablewrap"><table><thead><tr><th>번호</th><th>버스</th><th>시작</th><th class="num">승차</th><th class="num">잔류</th><th class="num">하차</th><th>결과</th><th>상태</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="8" class="empty">조건에 맞는 운행이 없습니다.</td></tr>'}</tbody></table></div>
+        <div class="tablewrap"><table><thead><tr><th>번호</th><th>버스</th><th>시작</th><th class="num">승차</th><th class="num">잔류</th><th class="num">하차</th><th>결과</th><th>상태</th><th>관리</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="9" class="empty">조건에 맞는 운행이 없습니다.</td></tr>'}</tbody></table></div>
         ${pager(data.total, tripsState.offset, TRIP_LIMIT, 'trips')}`,
     };
   }
@@ -252,6 +446,41 @@
 
   async function pageTripDetail(id) {
     const t = await api(`/trips/${id}`);
+    const remaining = Number(t.remaining_count) || 0;
+    const urgentAlerts = (t.open_alerts || []).filter(
+      a => a.level === 'URGENT'
+    );
+
+    const safetyPanel = urgentAlerts.length > 0
+      ? `
+        <div class="trip-safety-panel danger">
+          <div class="trip-safety-icon">🚨</div>
+          <div class="trip-safety-content">
+            <strong>긴급 안전 확인 필요</strong>
+            <p>미하차 의심 인원 ${remaining}명 · 열린 긴급 경고 ${urgentAlerts.length}건</p>
+            <a href="#/alerts/${urgentAlerts[0].id}">경고 상세 확인 →</a>
+          </div>
+        </div>
+      `
+      : t.result === 'MISSED'
+        ? `
+          <div class="trip-safety-panel warning">
+            <div class="trip-safety-icon">⚠️</div>
+            <div class="trip-safety-content">
+              <strong>미하차 의심 기록</strong>
+              <p>잔류 의심 ${remaining}명 · 현재 열린 긴급 경고는 없습니다.</p>
+            </div>
+          </div>
+        `
+        : `
+          <div class="trip-safety-panel safe">
+            <div class="trip-safety-icon">✓</div>
+            <div class="trip-safety-content">
+              <strong>${t.result === 'OK' ? '하차 확인 완료' : '긴급 미하차 경고 없음'}</strong>
+              <p>${t.result === 'OK' ? '현재 기록된 하차 결과가 정상입니다.' : '운행 결과와 사진 기록을 확인해 주세요.'}</p>
+            </div>
+          </div>
+        `;
     return {
       html: `<a class="back" href="#/trips">운행 목록</a>
         <header class="pagehead"><div><h1>${esc(t.bus_name || '버스')} 운행 #${t.id}</h1>
@@ -261,7 +490,8 @@
             ${badge(RESULT, t.result)}
             ${t.simulation_mode === true ? '<span class="badge warn">시뮬레이션</span>' : ''}
           </div></header>
-        <dl class="facts">
+          ${safetyPanel}
+          <dl class="facts">
           <div><dt>탑승 예정</dt><dd>${num(t.expected_count)}</dd></div><div><dt>승차</dt><dd>${num(t.boarding_count)}</dd></div>
           <div><dt>종점 잔류</dt><dd>${num(t.remaining_count)}</dd></div><div><dt>하차</dt><dd>${num(t.alighted_count)}</dd></div>
           <div><dt>종료 확인 방식</dt><dd>${t.confirm_method ? esc(t.confirm_method) : '-'}</dd></div>
@@ -286,74 +516,307 @@
   // 페이지: 경고
   // ======================================================================
   async function pageAlerts() {
-    const p = new URLSearchParams({ limit: ALERT_LIMIT, offset: alertsState.offset });
-    if (alertsState.status) p.set('status', alertsState.status);
+    const p = new URLSearchParams({
+      limit: ALERT_LIMIT,
+      offset: alertsState.offset
+    });
+
+    if (alertsState.status) {
+      p.set('status', alertsState.status);
+    }
+
     p.set('simulation_mode', String(alertsState.simulation));
-    const data = await api('/alerts?' + p);
+
+    const [data, summary, openSummary, urgentSummary] = await Promise.all([
+      api('/alerts?' + p),
+
+      // 전체 경고
+      api('/alerts?' + new URLSearchParams({
+        limit: '1',
+        simulation_mode: String(alertsState.simulation)
+      })),
+
+      // 미확인 경고
+      api('/alerts?' + new URLSearchParams({
+        limit: '1',
+        status: 'OPEN',
+        simulation_mode: String(alertsState.simulation)
+      })),
+
+      // 긴급 경고 (전체 페이지를 조회해야 정확히 집계 가능)
+      api('/alerts?' + new URLSearchParams({
+        limit: '1',
+        level: 'URGENT',
+        simulation_mode: String(alertsState.simulation)
+      }))
+    ]);
+
     const rows = data.items.map((a) => `<tr>
-      <td>${badge(LEVEL, a.level)}</td><td><a href="#/alerts/${a.id}">${esc(a.message)}</a></td><td>${esc(a.bus_name || '-')}</td>
-      <td>${badge(ALERT_STATUS, a.status)}</td><td>${fmtTime(a.created_at)}</td></tr>`).join('');
+      <td>${badge(LEVEL, a.level)}</td>
+      <td><a href="#/alerts/${a.id}">${esc(a.message)}</a></td>
+      <td>${esc(a.bus_name || '-')}</td>
+      <td>${badge(ALERT_STATUS, a.status)}</td>
+      <td>${fmtTime(a.created_at)}</td>
+      <td>
+        <a class="btn small" href="#/alerts/${a.id}">상세 보기 →</a>
+      </td>
+    </tr>`).join('');
+
     return {
-      html: `<header class="pagehead"><h1>경고</h1></header>
+      html: `
+        <header class="pagehead">
+          <div>
+            <h1>경고 관리</h1>
+            <p class="sub">차량별 안전 경고와 처리 상태를 확인합니다.</p>
+          </div>
+        </header>
+  
+        <dl class="strip">
+          <div>
+            <dt>전체 경고</dt>
+            <dd>
+              <div class="val">${summary.total}<small>건</small></div>
+              <div class="note">선택한 운행 유형 기준</div>
+            </dd>
+          </div>
+        
+          <div>
+            <dt>미확인 경고</dt>
+            <dd>
+              <div class="val">${openSummary.total}<small>건</small></div>
+              <div class="note">아직 확인하지 않은 경고</div>
+            </dd>
+          </div>
+        
+          <div>
+            <dt>긴급 경고</dt>
+            <dd>
+              <div class="val">${urgentSummary.total}<small>건</small></div>
+              <div class="note">긴급 수준의 전체 경고</div>
+            </dd>
+          </div>
+        </dl>
+  
         <div class="seg" aria-label="운행 구분">
           <button type="button"
             class="${!alertsState.simulation ? 'active' : ''}"
             data-act="alerts-simulation"
             data-simulation="false">실제 운행</button>
+  
           <button type="button"
             class="${alertsState.simulation ? 'active' : ''}"
             data-act="alerts-simulation"
             data-simulation="true">시뮬레이션</button>
         </div>
-        <div class="filters"><label>상태<select data-filter="alerts-status"><option value="">전체</option>${options(Object.entries(ALERT_STATUS), (e) => e[0], (e) => e[1][0], alertsState.status)}</select></label></div>
-        <div class="tablewrap"><table><thead><tr><th>수준</th><th>내용</th><th>버스</th><th>상태</th><th>발생</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="5" class="empty">조건에 맞는 경고가 없습니다.</td></tr>'}</tbody></table></div>
-        ${pager(data.total, alertsState.offset, ALERT_LIMIT, 'alerts')}`,
+  
+        <div class="filters">
+          <label>상태
+            <select data-filter="alerts-status">
+              <option value="">전체</option>
+              ${options(
+                Object.entries(ALERT_STATUS),
+                (e) => e[0],
+                (e) => e[1][0],
+                alertsState.status
+              )}
+            </select>
+          </label>
+        </div>
+  
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>수준</th>
+                <th>내용</th>
+                <th>버스</th>
+                <th>상태</th>
+                <th>발생</th>
+                <th>관리</th>
+              </tr>
+            </thead>
+  
+            <tbody>
+              ${rows || `
+                <tr>
+                  <td colspan="6" class="empty">
+                    조건에 맞는 경고가 없습니다.
+                  </td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+  
+        ${pager(data.total, alertsState.offset, ALERT_LIMIT, 'alerts')}
+      `,
     };
   }
 
   async function pageAlertDetail(id) {
     const a = await api(`/alerts/${id}`);
     const t = a.trip;
-    const steps = [`<li><span class="when">${fmtTime(a.created_at)}</span>경고 발생</li>`];
-    if (a.acked_at) steps.push(`<li><span class="when">${fmtTime(a.acked_at)}</span>경고 확인</li>`);
-    if (a.resolved_at) steps.push(`<li><span class="when">${fmtTime(a.resolved_at)}</span>해결 처리${a.note ? `<br><span class="muted-text">${esc(a.note)}</span>` : ''}</li>`);
 
-    const resolveForm = `<form data-form="resolve" class="resolve">
-      <input type="hidden" name="id" value="${a.id}">
-      <label>조치 메모<textarea name="note" id="note" placeholder="예: 차량 확인 후 아이를 발견해 보호자에게 인계했습니다"></textarea></label>
-      <label>해결 방식
-        <select name="resolve_mode" required>
-          <option value="">해결 방식 선택</option>
-          <option value="safety">실제 차량 내부 안전 확인 완료</option>
-          <option value="simulation">시뮬레이션 테스트 (실제 안전 확인 아님)</option>
-        </select>
-      </label>    
-      <button type="submit" class="btn primary">해결 처리</button></form>`;
+    const steps = [
+      `<li><span class="when">${fmtTime(a.created_at)}</span>경고 발생</li>`
+    ];
+
+    if (a.acked_at) {
+      steps.push(
+        `<li><span class="when">${fmtTime(a.acked_at)}</span>경고 확인</li>`
+      );
+    }
+
+    if (a.resolved_at) {
+      steps.push(
+        `<li><span class="when">${fmtTime(a.resolved_at)}</span>해결 처리${
+          a.note
+            ? `<br><span class="muted-text">${esc(a.note)}</span>`
+            : ''
+        }</li>`
+      );
+    }
+
+    const resolveForm = `
+      <form data-form="resolve" class="resolve">
+        <input type="hidden" name="id" value="${a.id}">
+  
+        <label>조치 메모
+          <textarea
+            name="note"
+            id="note"
+            placeholder="예: 차량 내부 확인 후 학생을 보호자에게 인계했습니다"
+          ></textarea>
+        </label>
+  
+        <label>해결 방식
+          <select name="resolve_mode" required>
+            <option value="">해결 방식 선택</option>
+            <option value="safety">실제 차량 내부 안전 확인 완료</option>
+            <option value="simulation">시뮬레이션 테스트 (실제 안전 확인 아님)</option>
+          </select>
+        </label>
+  
+        <button type="submit" class="btn primary">해결 처리</button>
+      </form>
+    `;
 
     return {
-      html: `<a class="back" href="#/alerts">경고 목록</a>
-        <header class="pagehead"><div><h1>${esc(a.message)}</h1><p class="sub">${esc(a.bus_name || '-')}, ${fmtTime(a.created_at)}</p></div>
-          <div>${badge(LEVEL, a.level)} ${badge(ALERT_STATUS, a.status)}</div></header>
-        ${a.llm_summary ? `<p class="summary">${esc(a.llm_summary)}</p>` : ''}
-        <dl class="facts">
-          <div><dt>승차</dt><dd>${num(t.boarding_count)}</dd></div><div><dt>종점 잔류</dt><dd>${num(t.remaining_count)}</dd></div>
-          <div><dt>하차</dt><dd>${num(t.alighted_count)}</dd></div>
-          <div><dt>검출 신뢰도 낮음</dt><dd>${a.event ? a.event.low_conf_count : '-'}</dd></div>
-          <div><dt>운행</dt><dd><a href="#/trips/${t.id}">#${t.id}</a></dd></div>
+      html: `
+        <a class="back" href="#/alerts">← 경고 목록으로</a>
+  
+        <header class="pagehead">
+          <div>
+            <h1>경고 상세</h1>
+            <p class="sub">안전 경고의 발생 정보와 조치 내역을 확인합니다.</p>
+          </div>
+          <div>
+            ${badge(LEVEL, a.level)}
+            ${badge(ALERT_STATUS, a.status)}
+          </div>
+        </header>
+  
+        <section class="alert-detail-banner">
+          <div class="alert-detail-banner-head">
+            <span>안전 경고</span>
+            <span>${fmtTime(a.created_at)}</span>
+          </div>
+          <h2>${esc(a.message)}</h2>
+          <p>${esc(a.bus_name || '-')}</p>
+        </section>
+  
+        <dl class="strip">
+          <div>
+            <dt>승차 인원</dt>
+            <dd>
+              <div class="val">${num(t.boarding_count)}<small>명</small></div>
+              <div class="note">승차 기록 기준</div>
+            </dd>
+          </div>
+  
+          <div>
+            <dt>하차 인원</dt>
+            <dd>
+              <div class="val">${num(t.alighted_count)}<small>명</small></div>
+              <div class="note">하차 기록 기준</div>
+            </dd>
+          </div>
+  
+          <div>
+            <dt>종점 잔류</dt>
+            <dd>
+              <div class="val">${num(t.remaining_count)}<small>명</small></div>
+              <div class="note">미하차 의심 인원</div>
+            </dd>
+          </div>
         </dl>
-        <section><h2>처리 이력</h2><ul class="timeline">${steps.join('')}</ul></section>
-        ${a.status === 'RESOLVED' ? '' : `<section><h2>조치</h2><div class="actions">
-          ${a.status === 'OPEN' ? `<button type="button" class="btn alert" data-act="ack" data-id="${a.id}">경고 확인</button>` : ''}
-          ${resolveForm}</div></section>`}
-        ${a.event ? `<section><h2>근거 사진</h2>
-          ${eventList([a.event])}
-          <img
-            src="${imgUrl(a.event.id)}"
-            alt="미하차 의심 근거 사진"
-            style="max-width:400px;width:100%;border-radius:8px;margin-top:12px;"
-          >
-        </section>` : ''}`,
+  
+        <section class="alert-detail-section">
+          <h2>경고 정보</h2>
+  
+          <dl class="facts">
+            <div>
+              <dt>경고 수준</dt>
+              <dd>${badge(LEVEL, a.level)}</dd>
+            </div>
+            <div>
+              <dt>처리 상태</dt>
+              <dd>${badge(ALERT_STATUS, a.status)}</dd>
+            </div>
+            <div>
+              <dt>검출 신뢰도 낮음</dt>
+              <dd>${a.event ? num(a.event.low_conf_count) : '-'}</dd>
+            </div>
+            <div>
+              <dt>관련 운행</dt>
+              <dd><a href="#/trips/${t.id}">운행 #${t.id} 상세 보기 →</a></dd>
+            </div>
+          </dl>
+        </section>
+  
+        ${a.llm_summary ? `
+          <section class="alert-detail-section">
+            <h2>AI 분석 요약</h2>
+            <p class="summary">${esc(a.llm_summary)}</p>
+          </section>
+        ` : ''}
+  
+        <section class="alert-detail-section">
+          <h2>처리 이력</h2>
+          <ul class="timeline">${steps.join('')}</ul>
+        </section>
+        
+        <div class="alert-detail-grid">    
+        ${a.status === 'RESOLVED' ? '' : `
+          <section class="alert-detail-section">
+            <h2>경고 조치</h2>
+            <div class="actions">
+              ${a.status === 'OPEN' ? `
+                <button
+                  type="button"
+                  class="btn alert"
+                  data-act="ack"
+                  data-id="${a.id}"
+                >경고 확인</button>
+              ` : ''}
+              ${resolveForm}
+            </div>
+          </section>
+        `}
+  
+        ${a.event ? `
+          <section class="alert-detail-section">
+            <h2>근거 사진 및 검출 기록</h2>
+            ${eventList([a.event])}
+            <img
+              src="${imgUrl(a.event.id)}"
+              alt="미하차 의심 근거 사진"
+              style="max-width:400px;width:100%;border-radius:8px;margin-top:12px;"
+            >
+          </section>
+        ` : ''}
+        </div>
+      `,
       after: fixImages,
     };
   }
@@ -400,8 +863,39 @@
     };
 
     return {
-      html: `<header class="pagehead"><div><h1>연결 요청</h1>
-          <p class="sub">학부모가 신청한 자녀를 확인하고 학생에 연결합니다. 승인하면 그 학부모가 해당 학생 버스의 경고를 받게 됩니다.</p></div></header>
+      html: `
+        <header class="pagehead">
+          <div>
+            <h1>연결 요청 관리</h1>
+            <p class="sub">학부모의 자녀 연결 신청을 검토하고 승인 또는 거절합니다.</p>
+          </div>
+        </header>
+
+        <dl class="strip">
+          <div>
+            <dt>현재 조회 결과</dt>
+            <dd>
+              <div class="val">${data.total}<small>건</small></div>
+              <div class="note">선택한 상태 필터 기준</div>
+            </dd>
+          </div>
+
+          <div>
+            <dt>현재 페이지</dt>
+            <dd>
+              <div class="val">${data.items.length}<small>건</small></div>
+              <div class="note">화면에 표시된 신청</div>
+            </dd>
+          </div>
+
+          <div>
+            <dt>연결 요청 관리</dt>
+            <dd>
+              <div class="note">신청자 확인 후 학생 연결</div>
+              <div class="note">승인 또는 거절 처리</div>
+            </dd>
+          </div>
+        </dl>
         <div class="filters"><label>상태<select data-filter="requests-status"><option value="">전체</option>${options(Object.entries(REQ_STATUS), (e) => e[0], (e) => e[1][0], reqState.status)}</select></label></div>
         ${data.items.length ? `<ul class="reqs">${data.items.map(card).join('')}</ul>`
           : `<p class="empty">${reqState.status === 'PENDING' ? '승인을 기다리는 요청이 없습니다.' : '조건에 맞는 요청이 없습니다.'}</p>`}
@@ -421,6 +915,8 @@
       api('/web/student-roster?' + p), api('/web/users'), api('/web/students'),
     ]);
     const parents = users.filter((u) => u.role === 'PARENT');
+    const totalStudents = allStudents.length;
+    const unlinkedStudents = null;
     if (!data.items.length && rosterState.offset > 0) { rosterState.offset = 0; return pageStudents(); }
     const editing = rosterState.edit ? data.items.find((s) => s.id === rosterState.edit) : null;
     if (rosterState.edit && !editing) rosterState.edit = null;
@@ -446,7 +942,39 @@
         <button type="button" class="btn" data-act="roster-cancel">취소</button></form>` : '';
 
     return {
-      html: `<header class="pagehead"><h1>학생·보호자</h1></header>
+      html: `
+        <header class="pagehead">
+          <div>
+            <h1>학생·보호자 관리</h1>
+            <p class="sub">학생 명부와 보호자 계정 및 연결 정보를 관리합니다.</p>
+          </div>
+        </header>
+      
+        <dl class="strip">
+          <div>
+            <dt>전체 학생</dt>
+            <dd>
+              <div class="val">${totalStudents}<small>명</small></div>
+              <div class="note">전체 등록 학생 기준</div>
+            </dd>
+          </div>
+      
+          <div>
+            <dt>보호자 계정</dt>
+            <dd>
+              <div class="val">${parents.length}<small>명</small></div>
+              <div class="note">등록된 학부모 계정</div>
+            </dd>
+          </div>
+      
+          <div>
+            <dt>현재 조회 학생</dt>
+            <dd>
+              <div class="val">${data.total}<small>명</small></div>
+              <div class="note">검색 및 반 필터 기준</div>
+            </dd>
+          </div>
+        </dl>
         <p class="sub-lead">학생을 등록하고 졸업한 학생을 삭제합니다. 삭제하면 그 학생의 보호자 연결, 버스 배정, 출결 기록도 함께 지워집니다. 학부모 계정과 운행·경고 기록은 남습니다.</p>
         <form data-form="rosterSearch" class="filters">
           <label>이름 검색<input name="q" value="${esc(rosterState.q)}" placeholder="이름" maxlength="100"></label>
