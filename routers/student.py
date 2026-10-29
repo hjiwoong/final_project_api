@@ -53,7 +53,18 @@ def my_children(me: User = Depends(require_parent), db: Session = Depends(get_db
         .filter(Guardian.user_id == me.id)
         .all()
     )
-    return [student_to_dict(s) for s in rows]
+    children = []
+    for student in rows:
+        attendance = (
+            db.query(Attendance)
+            .filter(Attendance.student_id == student.id, Attendance.date == date.today())
+            .first()
+        )
+        children.append({
+            **student_to_dict(student),
+            "is_absent": attendance.is_absent if attendance else False,
+        })
+    return children
 
 
 @router.put("/me/children/{student_id}/attendance")
