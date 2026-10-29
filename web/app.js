@@ -25,6 +25,11 @@
     const d = new Date(s);
     return isNaN(d) ? '-' : `${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
+  function fmtTripTime(s) {
+    if (!s) return '--:--';
+    const d = new Date(s);
+    return isNaN(d) ? '--:--' : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
   function fmtDate(s) {
     if (!s) return '-';
     const d = new Date(s);
@@ -40,8 +45,8 @@
 
   const RESULT = { OK: ['정상', 'ok'], MISSED: ['미하차 의심', 'bad'], NEEDS_CHECK: ['확인 필요', 'warn'], PENDING: ['대기', 'muted'] };
   const TRIP_STATUS = {
-    IN_PROGRESS: ['진행 중', 'warn'],
-    CLOSED: ['종료', 'ok']
+    IN_PROGRESS: ['운행 중', 'warn'],
+    CLOSED: ['운행 완료', 'ok']
   };
   const ALERT_STATUS = { OPEN: ['미확인', 'bad'], ACKED: ['확인함', 'warn'], RESOLVED: ['해결됨', 'ok'] };
   const LEVEL = { URGENT: ['긴급', 'bad'], CHECK: ['확인 필요', 'warn'] };
@@ -89,6 +94,11 @@
   const tripsState = {
     result: '',
     status: '',
+    bus_id: '',
+    driver_id: '',
+    search: '',
+    from: '',
+    to: '',
     offset: 0,
     simulation: false
   };
@@ -287,7 +297,22 @@
     const checkPct = totalTrips ? Math.round(checkCount / totalTrips * 100) : 0;
     const missedPct = totalTrips ? Math.round(riskCount / totalTrips * 100) : 0;
     const ring = totalTrips ? `conic-gradient(#24815b 0 ${normalPct}%, #e8ac19 ${normalPct}% ${normalPct + checkPct}%, #dc404c ${normalPct + checkPct}% ${normalPct + checkPct + missedPct}%, #dce4ee ${normalPct + checkPct + missedPct}% 100%)` : '#e7edf4';
-    const kpi = (kind, label, value, unit, detail, href, icon) => `<a class="overview-kpi ${kind}" href="${href}"><div class="overview-kpi-top"><span class="overview-kpi-icon" aria-hidden="true">${icon}</span><span class="overview-kpi-arrow" aria-hidden="true">↗</span></div><span class="overview-kpi-label">${label}</span><strong>${value}<small>${unit}</small></strong><span class="overview-kpi-note">${detail}</span></a>`;
+    const kpi = (kind, label, value, unit, detail, href, icon) => `
+      <a
+        class="overview-kpi ${kind}"
+        href="${href}"
+        ${href === '#/trips' ? `data-dash-trip-link="true" ${label === '미하차 의심' ? 'data-trip-result="MISSED"' : ''}` : ''}
+        ${label === '미해결 경고' ? 'data-dash-unresolved="true"' : ''}
+      >
+        <div class="overview-kpi-top">
+          <span class="overview-kpi-icon" aria-hidden="true">${icon}</span>
+          <span class="overview-kpi-arrow" aria-hidden="true">↗</span>
+        </div>
+        <span class="overview-kpi-label">${label}</span>
+        <strong>${value}<small>${unit}</small></strong>
+        <span class="overview-kpi-note">${detail}</span>
+      </a>
+    `;
     const tripStatus = (t) => `${badge(TRIP_STATUS, t.status)} ${badge(RESULT, t.result)}`;
     const dateLabel = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
     const scope = `${dashSimulation ? '시뮬레이션' : '실제 운행'} · ${periodText}`;
@@ -303,8 +328,8 @@
         </div><span class="dashboard-toolbar-note">선택한 유형의 기록만 표시됩니다</span></div>
         <section class="dashboard-kpis" aria-label="핵심 안전 현황">
           ${kpi('danger', '미해결 경고', unresolved, '건', `미확인 ${s.alert_by_status?.OPEN || 0}건 · 확인함 ${s.alert_by_status?.ACKED || 0}건`, '#/alerts', uiIcon('bell', 30))}
-          ${kpi('warning', '운행 중인 버스', activeBusCount, '대', '서버의 진행 중 운행 기록 기준', '#/trips', uiIcon('bus', 30))}
-          ${kpi('danger', '미하차 의심', riskCount, '건', '안전 확인이 필요한 운행 기록', '#/trips', uiIcon('people', 30))}
+          ${kpi('warning', '운행 중인 버스', activeBusCount, '대', '현재 진행 중인 운행 기록 기준', '#/trips', uiIcon('bus', 30))}
+          ${kpi('danger', '미하차 의심', riskCount, '건', '선택 기간의 미하차 의심 운행', '#/trips', uiIcon('people', 30))}
           <div class="overview-distribution"><div class="overview-distribution-heading"><strong>운행 결과 현황</strong><span>${esc(periodText)}</span></div>
             <div class="overview-distribution-body"><div class="overview-donut" style="--ring:${ring}" role="img" aria-label="정상 ${normalCount}건, 확인 필요 ${checkCount}건, 미하차 의심 ${riskCount}건"><div><strong>${totalTrips}</strong><small>총 운행</small></div></div>
             <div class="overview-donut-legend"><span><i class="normal"></i>정상 <strong>${normalCount}건</strong></span><span><i class="check"></i>확인 필요 <strong>${checkCount}건</strong></span><span><i class="missed"></i>미하차 의심 <strong>${riskCount}건</strong></span></div></div>
@@ -321,12 +346,22 @@
           }).join('') || '<p class="empty">등록된 차량이 없습니다.</p>'}</div></section>
         </div>
         <div class="dashboard-bottom-grid">
-          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 위험 경고</h2><p>최근 발생한 경고 기록</p></div><a href="#/alerts">전체 보기 →</a></div><div class="dashboard-feed">${recentAlerts.map(a => `<a href="#/alerts/${a.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon danger">!</span><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<p class="empty">해당 기간 경고가 없습니다.</p>'}</div></section>
+          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 위험 경고</h2><p>최근 발생한 경고 기록</p></div><a href="#/alerts">전체 보기 →</a></div><div class="dashboard-feed">${recentAlerts.map(a => `<a href="#/alerts/${a.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon ${a.status === 'RESOLVED' ? 'resolved' : 'danger'}">
+            ${a.status === 'RESOLVED' ? '✓' : '!'}
+          </span><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<p class="empty">해당 기간 경고가 없습니다.</p>'}</div></section>
           <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 운행 기록</h2><p>최근 운행 결과 및 상태</p></div><a href="#/trips">전체 보기 →</a></div><div class="dashboard-feed">${recentTrips.map(t => `<a href="#/trips/${t.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon bus">🚌</span><span class="dashboard-feed-info"><strong>${esc(t.bus_name || '차량 정보 없음')}</strong><small>${fmtTime(t.started_at)} · 승차 ${num(t.boarding_count)}명 / 하차 ${num(t.alighted_count)}명</small></span><span class="dashboard-feed-tags">${tripStatus(t)}</span></a>`).join('') || '<p class="empty">해당 기간 운행 기록이 없습니다.</p>'}</div></section>
-          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>보호자 연결 요청</h2><p>승인을 기다리는 신청</p></div><a href="#/requests">전체 보기 →</a></div><div class="dashboard-feed">${requests ? (requests.items || []).map(r => `<a href="#/requests" class="dashboard-feed-row"><span class="dashboard-feed-icon person">♙</span><span class="dashboard-feed-info"><strong>${esc(r.user?.name || '신청자')}</strong><small>${esc(r.child_name || '학생 정보 없음')}${r.class_name ? ` (${esc(r.class_name)})` : ''} · ${fmtTime(r.created_at)}</small></span><span class="badge warn">승인 대기</span></a>`).join('') || '<p class="empty">대기 중인 연결 요청이 없습니다.</p>' : '<p class="empty">연결 요청 정보를 불러올 수 없습니다.</p>'}</div></section>
+          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>보호자 연결 요청</h2><p>승인을 기다리는 신청</p></div><a href="#/requests">전체 보기 →</a></div><div class="dashboard-feed">${requests ? (requests.items || []).map(r => `<a href="#/requests" class="dashboard-feed-row"><span class="dashboard-feed-icon person">♙</span><span class="dashboard-feed-info"><strong>${esc(r.user?.name || '신청자')}</strong><small>${esc(r.child_name || '학생 정보 없음')}${r.class_name ? ` (${esc(r.class_name)})` : ''} · ${fmtTime(r.created_at)}</small></span><span class="badge warn">승인 대기</span></a>`).join('') || '<div class="dashboard-empty-state"><span class="dashboard-empty-icon">✓</span><p>대기 중인 연결 요청이 없습니다.</p></div>'
+      : '<div class="dashboard-empty-state"><p>연결 요청 정보를 불러올 수 없습니다.</p></div>'}</div></section>
         </div>
-        <footer class="dashboard-footer"><span>사진 수신 후 알림까지 평균 ${fmtMs(nd.avg_ms)}${nd.sample_count ? ` · ${nd.sample_count}건 기준` : ''}</span><span>표시된 기록은 선택한 기간과 운행 유형을 따릅니다.</span></footer>
-      </div>`
+        <footer class="dashboard-footer">
+          <span>
+            ${Number(nd.sample_count) > 0 && nd.avg_ms != null
+              ? `사진 수신 후 알림까지 평균 ${fmtMs(nd.avg_ms)} · ${nd.sample_count}건 기준`
+              : '사진 수신 후 알림 시간: 측정 데이터 없음'}
+          </span>
+          <span>표시된 기록은 선택한 기간과 운행 유형을 따릅니다.</span>
+        </footer>
+       </div>`
     };
   }
 
@@ -341,13 +376,28 @@
     });
     if (tripsState.result) p.set('result', tripsState.result);
     if (tripsState.status) p.set('status', tripsState.status);
+    if (tripsState.bus_id) p.set('bus_id', tripsState.bus_id);
+    if (tripsState.driver_id) p.set('driver_id', tripsState.driver_id);
+    if (tripsState.search.trim()) p.set('search', tripsState.search.trim());
 
-    const [data, summary] = await Promise.all([
+    if (tripsState.from) {
+      p.set('from', `${tripsState.from}T00:00:00`);
+    }
+
+    if (tripsState.to) {
+      p.set('to', `${tripsState.to}T23:59:59.999999`);
+    }
+
+    const [data, summary, buses, users] = await Promise.all([
       api('/trips?' + p),
       api('/stats/summary?' + new URLSearchParams({
         simulation_mode: String(tripsState.simulation)
-      }))
+      })),
+      api('/web/buses'),
+      api('/web/users')
     ]);
+
+    const drivers = users.filter(u => u.role === 'ADMIN');
 
     const stats = [
       ['전체 운행', summary.trip_count, '전체 운행 기록', 'bus'],
@@ -357,28 +407,133 @@
     ];
 
     const rows = data.items.map(t => `
-      <tr>
-        <td><a href="#/trips/${t.id}">#${t.id}</a></td>
-        <td><strong>${esc(t.bus_name || t.bus_id)}</strong></td>
-        <td>${fmtTime(t.started_at)}</td>
-        <td>${badge(TRIP_STATUS, t.status)}</td>
-        <td>${badge(RESULT, t.result)}</td>
-        <td class="num">${num(t.boarding_count)}명</td>
-        <td class="num">${num(t.alighted_count)}명</td>
-        <td class="num">${num(t.remaining_count)}명</td>
-        <td><a class="trip-detail-btn" href="#/trips/${t.id}">상세 보기 →</a></td>
-      </tr>
+      <article class="trip-record-card">
+        <div class="trip-record-main">
+          <div class="trip-record-icon">
+            <svg viewBox="0 0 24 24" width="22" height="22"
+              fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="3" width="14" height="15" rx="3"/>
+              <path d="M5 11h14M8 18v3m8-3v3M8 7h.01M16 7h.01"/>
+            </svg>
+          </div>
+    
+          <div class="trip-record-info">
+            <div class="trip-record-title">
+              <strong>${esc(t.bus_name || t.bus_id)}</strong>
+              
+              ${t.trip_type === 'TO_SCHOOL'
+                ? '<span class="trip-type-badge to-school">등교</span>'
+                : t.trip_type === 'TO_HOME'
+                  ? '<span class="trip-type-badge to-home">하교</span>'
+                  : ''}
+              ${badge(TRIP_STATUS, t.status)}
+              ${badge(RESULT, t.result)}
+            </div>
+            <div class="trip-record-meta">
+              <span class="trip-record-plate">
+                차량번호: ${esc(t.plate_no || '미등록')}
+              </span>
+
+              <span class="trip-record-driver">
+                기사: ${esc(users.find(u => Number(u.id) === Number(t.driver_id))?.name || '미배정')}
+              </span>
+
+              <span class="trip-record-time">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="9"/>
+                  <path d="M12 7v5l3 2"/>
+                </svg>
+              
+                ${fmtTripTime(t.started_at || t.scheduled_start_at)}
+                →
+                ${fmtTripTime(t.ended_at || t.scheduled_end_at)}
+              </span>
+            </div>
+          </div>
+        </div>
+    
+        <div class="trip-record-counts">
+          <div>
+            <span>승차</span>
+            <strong>${num(t.boarding_count)}명</strong>
+          </div>
+          <div>
+            <span>하차</span>
+            <strong>${num(t.alighted_count)}명</strong>
+          </div>
+          <div>
+            <span>잔류</span>
+            <strong>${num(t.remaining_count)}명</strong>
+          </div>
+        </div>
+    
+        <a class="trip-record-detail" href="#/trips/${t.id}">
+          상세 보기
+          <span aria-hidden="true">→</span>
+        </a>
+      </article>
     `).join('');
 
     return {
       html: `
-        <header class="pagehead">
+        <header class="pagehead trip-pagehead">
           <div>
             <h1>운행 관리</h1>
             <p class="sub">차량별 운행 기록과 학생 안전 상태를 관리합니다.</p>
           </div>
-          <span class="badge muted">${tripsState.simulation ? '시뮬레이션' : '실제 운행'}</span>
+        
+          <div class="trip-header-actions">
+            <form class="trip-date-form" data-form="trip-date">
+              <label>
+                시작일
+                <input
+                  type="date"
+                  name="from"
+                  value="${esc(tripsState.from)}"
+                >
+              </label>
+        
+              <span class="trip-date-separator">~</span>
+        
+              <label>
+                종료일
+                <input
+                  type="date"
+                  name="to"
+                  value="${esc(tripsState.to)}"
+                >
+              </label>
+        
+              <button type="submit" class="btn primary">
+                조회
+              </button>
+        
+              <button type="button" class="btn" data-act="trip-date-reset">
+                초기화
+              </button>
+            </form>
+        
+            <span class="badge muted">
+              ${tripsState.simulation ? '시뮬레이션' : '실제 운행'}
+            </span>
+          </div>
         </header>
+        
+        <div class="trip-summary-heading">
+          <h3>전체 운행 현황</h3>
+          <span class="sub">날짜 및 검색 필터와 관계없는 전체 통계</span>
+        </div>
   
         <div class="trip-summary trip-summary-v2">
           ${stats.map(([label, value, note, type]) => `
@@ -404,31 +559,86 @@
             </div>
           </div>
   
+          <div class="trip-status-tabs" aria-label="운행 상태별 조회">
+            <button type="button"
+              class="trip-status-tab ${!tripsState.status ? 'active' : ''}"
+              data-act="trips-status-tab" data-status="">
+              전체
+            </button>
+          
+            <button type="button"
+              class="trip-status-tab ${tripsState.status === 'IN_PROGRESS' ? 'active' : ''}"
+              data-act="trips-status-tab" data-status="IN_PROGRESS">
+              운행 중
+            </button>
+          
+            <button type="button" class="trip-status-tab" disabled
+              title="운행 예정 기능은 추후 지원됩니다">
+              운행 예정
+            </button>
+          
+            <button type="button"
+              class="trip-status-tab ${tripsState.status === 'CLOSED' ? 'active' : ''}"
+              data-act="trips-status-tab" data-status="CLOSED">
+              운행 완료
+            </button>
+          
+            <button type="button" class="trip-status-tab" disabled
+              title="운행 취소 기능은 추후 지원됩니다">
+              운행 취소
+            </button>
+          </div>
+          
           <div class="filters trip-filters">
-            <label>운행 결과
-              <select data-filter="trips-result">
-                <option value="">전체 결과</option>
-                ${options(Object.entries(RESULT), e => e[0], e => e[1][0], tripsState.result)}
+          <form class="trip-search-form" data-form="trip-search">
+            <input
+              type="search"
+              name="search"
+              placeholder="버스명, 차량번호, 기사 이름 검색"
+              aria-label="운행 기록 검색"
+              value="${esc(tripsState.search)}"
+            >
+            <button type="submit" class="btn primary">검색</button>
+          </form>
+            <label>버스 선택
+              <select data-filter="trips-bus">
+                <option value="">전체 버스</option>
+                ${options(
+                  buses,
+                  b => b.id,
+                  b => b.name || `버스 #${b.id}`,
+                  tripsState.bus_id
+                )}
               </select>
             </label>
-            <label>운행 상태
-              <select data-filter="trips-status">
-                <option value="">전체 상태</option>
-                ${options(Object.entries(TRIP_STATUS), e => e[0], e => e[1][0], tripsState.status)}
+            
+            <label>기사 선택
+              <select data-filter="trips-driver">
+                <option value="">전체 기사</option>
+                ${options(
+                  drivers,
+                  u => u.id,
+                  u => u.name || `기사 #${u.id}`,
+                  tripsState.driver_id
+                )}
+              </select>
+            </label>
+            
+            <label>안전 결과
+              <select data-filter="trips-result">
+                <option value="">전체 안전 결과</option>
+                ${options(
+                  Object.entries(RESULT),
+                  e => e[0],
+                  e => e[1][0],
+                  tripsState.result
+                )}
               </select>
             </label>
           </div>
   
-          <div class="tablewrap">
-            <table>
-              <thead><tr>
-                <th>운행 번호</th><th>버스</th><th>시작 시간</th>
-                <th>운행 상태</th><th>안전 결과</th>
-                <th class="num">승차</th><th class="num">하차</th>
-                <th class="num">잔류</th><th>관리</th>
-              </tr></thead>
-              <tbody>${rows || '<tr><td colspan="9" class="empty">조건에 맞는 운행 기록이 없습니다.</td></tr>'}</tbody>
-            </table>
+          <div class="trip-record-list">
+            ${rows || '<div class="empty">조건에 맞는 운행 기록이 없습니다.</div>'}
           </div>
           ${pager(data.total, tripsState.offset, TRIP_LIMIT, 'trips')}
         </section>
@@ -439,18 +649,136 @@
   const imgUrl = (eventId) => `/events/${eventId}/image?token=${encodeURIComponent(token)}`;
 
   function eventList(events) {
-    if (!events.length) return '<p class="empty">아직 기록된 사진이 없습니다.</p>';
-    return `<ul class="events">${events.map((e) => `<li>
-      <div><h3>${esc(EVENT_LABEL[e.event_type] || e.event_type)}</h3>
-        <p class="meta">검출 ${e.person_count}명, 제외 ${e.exclude_count}명, 신뢰도 낮음 ${e.low_conf_count}건<br>수신 ${fmtTime(e.uploaded_at)}</p></div>
-      ${e.image_available && e.event_type !== 'MISMATCH'
-        ? `<img src="${imgUrl(e.id)}" alt="${esc(EVENT_LABEL[e.event_type] || '')} 실내 사진" loading="lazy">`
-        : `<span class="nophoto">${e.event_type === 'MISMATCH' ? '' : '보관 기간이 지나 사진이 삭제되었습니다'}</span>`}
-    </li>`).join('')}</ul>`;
+    if (!events.length) {
+      return '<p class="empty">아직 기록된 검출 기록이 없습니다.</p>';
+    }
+
+    return `
+      <ul class="trip-event-list">
+        ${events.map((e) => {
+          const label = EVENT_LABEL[e.event_type] || e.event_type;
+          const hasPhoto = e.image_available && e.event_type !== 'MISMATCH';
+  
+          return `
+            <li class="trip-event-item">
+              ${hasPhoto ? `
+                <button
+                  type="button"
+                  class="trip-event-thumb trip-event-photo-btn"
+                  data-photo-id="${Number(e.id)}"
+                  data-photo-label="${esc(label)}"
+                  aria-label="${esc(label)} 사진 확대"
+                >
+                  <img
+                    src="${imgUrl(e.id)}"
+                    alt="${esc(label)} 실내 사진"
+                    loading="lazy"
+                  >
+                </button>
+              ` : `
+                <div class="trip-event-thumb trip-event-no-image">
+                  <span>${e.event_type === 'MISMATCH'
+                    ? '검출 기록'
+                    : '사진 없음'}</span>
+                </div>
+              `}
+  
+              <div class="trip-event-info">
+                <h3>${esc(label)}</h3>
+  
+                <p class="trip-event-time">
+                  ${e.uploaded_at ? fmtTime(e.uploaded_at).split(' ').pop() : '--:--'}
+                </p>
+  
+                <div class="trip-event-counts">
+                  <span>검출 ${Number(e.person_count) || 0}명</span>
+                  <span>제외 ${Number(e.exclude_count) || 0}명</span>
+                  <span>신뢰도 낮음 ${Number(e.low_conf_count) || 0}건</span>
+                </div>
+  
+                ${!hasPhoto && e.event_type !== 'MISMATCH' ? `
+                  <p class="trip-event-note">
+                    보관 중인 사진이 없습니다.
+                  </p>
+                ` : ''}
+              </div>
+            </li>
+          `;
+        }).join('')}
+      </ul>
+    `;
   }
 
+   function openTripPhoto(photoId, label) {
+    const oldModal = document.querySelector('.trip-photo-modal');
+    if (oldModal) oldModal.remove();
+
+    const modal = document.createElement('div');
+    modal.className = 'trip-photo-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', `${label} 사진 확대`);
+
+    modal.innerHTML = `
+      <div class="trip-photo-modal-content">
+        <div class="trip-photo-modal-head">
+          <h3>${esc(label)}</h3>
+          <button
+            type="button"
+            class="trip-photo-modal-close"
+            aria-label="사진 닫기"
+          >×</button>
+        </div>
+
+        <img
+          src="${imgUrl(photoId)}"
+          alt="${esc(label)} 실내 사진"
+        >
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const close = () => {
+      modal.remove();
+      document.removeEventListener('keydown', onKeyDown);
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') close();
+    };
+
+    modal.querySelector('.trip-photo-modal-close')
+      .addEventListener('click', close);
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) close();
+    });
+
+    document.addEventListener('keydown', onKeyDown);
+  }
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.trip-event-photo-btn');
+    if (!btn) return;
+
+    openTripPhoto(
+      Number(btn.dataset.photoId),
+      btn.dataset.photoLabel || '검출 사진'
+    );
+  });
+
   async function pageTripDetail(id) {
-    const t = await api(`/trips/${id}`);
+    const [t, buses, users] = await Promise.all([
+      api(`/trips/${id}`),
+      api('/web/buses'),
+      api('/web/users')
+    ]);
+
+    const bus = buses.find(b => Number(b.id) === Number(t.bus_id));
+    const driverId = t.driver_id ?? bus?.driver_id;
+    const driver = users.find(u => Number(u.id) === Number(driverId));
+
     const remaining = Number(t.remaining_count) || 0;
     const openAlerts = t.open_alerts || [];
     const urgentAlerts = openAlerts.filter(
@@ -556,12 +884,9 @@
   
           <header class="pagehead">
             <div>
-              <h1>${esc(t.bus_name || '버스')} 운행 #${t.id}</h1>
+              <h1>${esc(t.bus_name || '버스')}</h1>
               <p class="sub">
-                시작 ${fmtTime(t.started_at)}
-                ${t.ended_at
-                  ? ` · 종료 ${fmtTime(t.ended_at)}`
-                  : ''}
+                운행 날짜 ${fmtDate(t.started_at)}
               </p>
             </div>
   
@@ -597,24 +922,29 @@
   
             <dl class="trip-detail-facts">
               <div>
-                <dt>운행 번호</dt>
-                <dd>#${t.id}</dd>
+                <dt>버스명</dt>
+                <dd>${esc(t.bus_name || bus?.name || '미등록')}</dd>
               </div>
               <div>
-                <dt>운행 상태</dt>
-                <dd>${badge(TRIP_STATUS, t.status)}</dd>
+                <dt>차량번호</dt>
+                <dd>${esc(t.plate_no || bus?.plate_no || '미등록')}</dd>
               </div>
               <div>
-                <dt>안전 결과</dt>
-                <dd>${badge(RESULT, t.result)}</dd>
+                <dt>담당 기사</dt>
+                <dd>${esc(driver?.name || '미배정')}</dd>
               </div>
               <div>
-                <dt>종료 확인 방식</dt>
-                <dd>${t.confirm_method === 'button'
-                      ? '버튼으로 종료 확인'
-                      : t.confirm_method
-                        ? esc(t.confirm_method)
-                        : '-'}</dd>
+                <dt>운행 시간</dt>
+                <dd class="trip-detail-time">
+                  <svg viewBox="0 0 24 24" width="16" height="16"
+                    fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round"
+                    aria-hidden="true">
+                    <circle cx="12" cy="12" r="9"/>
+                    <path d="M12 7v5l3 2"/>
+                  </svg>
+                  ${t.started_at ? fmtTime(t.started_at).split(' ').pop() : '--:--'} → ${t.ended_at ? fmtTime(t.ended_at).split(' ').pop() : '운행 중'}
+                </dd>
               </div>
             </dl>
           </section>
@@ -683,24 +1013,73 @@
       simulation_mode: String(alertsState.simulation)
     });
 
-    if (alertsState.status) {
+    if (alertsState.status && alertsState.status !== 'UNRESOLVED') {
       p.set('status', alertsState.status);
+    }
+
+    // 미해결 경고는 OPEN + ACKED를 서버에서 모두 조회
+    async function fetchAllAlerts(status) {
+      const items = [];
+      const limit = 100;
+      let offset = 0;
+
+      while (true) {
+        const params = new URLSearchParams({
+          status,
+          limit: String(limit),
+          offset: String(offset),
+          simulation_mode: String(alertsState.simulation)
+        });
+
+        const response = await api('/alerts?' + params);
+        items.push(...response.items);
+
+        offset += response.items.length;
+
+        if (response.items.length === 0 || offset >= response.total) {
+          break;
+        }
+      }
+
+      return items;
     }
 
     const mode = String(alertsState.simulation);
 
     const [data, summary, openSummary, urgentSummary] =
       await Promise.all([
-        api('/alerts?' + p),
+        alertsState.status === 'UNRESOLVED'
+          ? Promise.all([
+              fetchAllAlerts('OPEN'),
+              fetchAllAlerts('ACKED')
+            ]).then(([openItems, ackedItems]) => {
+              const allItems = [...openItems, ...ackedItems];
+
+              allItems.sort((a, b) =>
+                new Date(b.created_at) - new Date(a.created_at)
+              );
+
+              return {
+                total: allItems.length,
+                items: allItems.slice(
+                  alertsState.offset,
+                  alertsState.offset + ALERT_LIMIT
+                )
+              };
+            })
+          : api('/alerts?' + p),
+
         api('/alerts?' + new URLSearchParams({
           limit: '1',
           simulation_mode: mode
         })),
+
         api('/alerts?' + new URLSearchParams({
           limit: '1',
           status: 'OPEN',
           simulation_mode: mode
         })),
+
         api('/alerts?' + new URLSearchParams({
           limit: '1',
           level: 'URGENT',
@@ -810,6 +1189,7 @@
               <label>처리 상태
                 <select data-filter="alerts-status">
                   <option value="">전체 상태</option>
+                  <option value="UNRESOLVED" ${alertsState.status === 'UNRESOLVED' ? 'selected' : ''}>미해결 전체</option>
                   ${options(
                     Object.entries(ALERT_STATUS),
                     e => e[0],
@@ -1560,6 +1940,24 @@
   // 폼 처리
   // ======================================================================
   const forms = {
+    'trip-search': async (data) => {
+      tripsState.search = (data.search || '').trim();
+      tripsState.offset = 0;
+      return null;
+    },
+
+    'trip-date': async (data) => {
+      if (data.from && data.to && data.from > data.to) {
+        throw new Error('시작일은 종료일보다 늦을 수 없습니다.');
+      }
+
+      tripsState.from = data.from || '';
+      tripsState.to = data.to || '';
+      tripsState.offset = 0;
+
+      return null;
+    },
+
     async student(f) {
       await api('/web/students', { method: 'POST', body: { name: f.name, class_name: f.class_name || null, consent_at: f.consent_at ? `${f.consent_at}T00:00:00` : null } });
       return '학생을 등록했습니다';
@@ -1657,6 +2055,27 @@
 
   // ---------- 클릭 / 선택 위임 ----------
   document.addEventListener('click', async (e) => {
+    // 대시보드 운행 카드 클릭 시 운행 유형 전달
+    const tripLink = e.target.closest('[data-dash-trip-link]');
+
+    if (tripLink) {
+      tripsState.simulation = dashSimulation;
+
+      if (tripLink.dataset.tripResult === 'MISSED') {
+        tripsState.result = 'MISSED';
+      }
+
+      tripsState.offset = 0;
+    }
+
+    // 대시보드 미해결 경고 카드 클릭 시 필터 전달
+    const unresolvedLink = e.target.closest('[data-dash-unresolved]');
+
+    if (unresolvedLink) {
+      alertsState.simulation = dashSimulation;
+      alertsState.status = 'UNRESOLVED';
+      alertsState.offset = 0;
+    }
     const el = e.target.closest('[data-act], [data-dash-sim]');
     if (!el) return;
     const act = el.dataset.dashSim !== undefined ? 'dash-sim' : el.dataset.act;
@@ -1672,6 +2091,15 @@
       route();
     } else if (act === 'trips-simulation') {
       tripsState.simulation = el.dataset.simulation === 'true';
+      tripsState.offset = 0;
+      route();
+    } else if (act === 'trips-status-tab') {
+      tripsState.status = el.dataset.status || '';
+      tripsState.offset = 0;
+      route();
+    } else if (act === 'trip-date-reset') {
+      tripsState.from = '';
+      tripsState.to = '';
       tripsState.offset = 0;
       route();
     } else if (act === 'page') {
@@ -1715,6 +2143,8 @@
     const k = e.target.dataset && e.target.dataset.filter;
     if (!k) return;
     if (k === 'trips-result') { tripsState.result = e.target.value; tripsState.offset = 0; }
+    if (k === 'trips-bus') { tripsState.bus_id = e.target.value; tripsState.offset = 0; }
+    if (k === 'trips-driver') { tripsState.driver_id = e.target.value; tripsState.offset = 0; }
     if (k === 'trips-status') { tripsState.status = e.target.value; tripsState.offset = 0; }
     if (k === 'alerts-status') { alertsState.status = e.target.value; alertsState.offset = 0; }
     if (k === 'roster-class') { rosterState.class_name = e.target.value; rosterState.offset = 0; }

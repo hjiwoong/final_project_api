@@ -2760,3 +2760,701 @@ input[type="checkbox"] { display: inline-block; width: 1.1rem; height: 1.1rem; m
   width: 20px;
   height: 20px;
 }
+
+/* =========================================
+   운행 관리 B안 - 카드형 운행 목록
+========================================= */
+
+.trip-record-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.trip-record-card {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 22px 24px;
+  background: #fff;
+  border: 1px solid #e3e9f1;
+  border-radius: 16px;
+  box-shadow: 0 3px 12px rgba(20, 40, 70, 0.035);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+
+.trip-record-card:hover {
+  border-color: #a9c6ee;
+  box-shadow: 0 8px 22px rgba(25, 55, 95, 0.09);
+  transform: translateY(-2px);
+}
+
+.trip-record-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+}
+
+.trip-record-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 15px;
+  color: #2468c9;
+  background: #eaf3ff;
+}
+
+.trip-record-info {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.trip-record-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trip-record-title strong {
+  color: #172b4d;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.trip-record-id,
+.trip-record-time {
+  color: #718096;
+  font-size: 12px;
+}
+
+.trip-record-counts {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 24px;
+  border-left: 1px solid #e8edf4;
+}
+
+.trip-record-counts > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 48px;
+}
+
+.trip-record-counts span {
+  color: #8290a3;
+  font-size: 12px;
+}
+
+.trip-record-counts strong {
+  color: #233653;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.trip-record-counts > div:last-child strong {
+  color: #d97706;
+}
+
+.trip-record-detail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 10px 15px;
+  border: 1px solid #d3e1f3;
+  border-radius: 9px;
+  background: #f7fbff;
+  color: #2468c9;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.trip-record-detail:hover {
+  background: #e8f2ff;
+}
+
+/* 태블릿 */
+@media (max-width: 1100px) {
+  .trip-record-card {
+    flex-wrap: wrap;
+    gap: 18px;
+  }
+
+  .trip-record-counts {
+    border-left: 0;
+    padding: 0;
+  }
+
+  .trip-record-detail {
+    margin-left: auto;
+  }
+}
+
+/* 모바일 */
+@media (max-width: 600px) {
+  .trip-record-list {
+    gap: 12px;
+  }
+
+  .trip-record-card {
+    padding: 18px;
+    gap: 16px;
+  }
+
+  .trip-record-main {
+    flex-basis: 100%;
+  }
+
+  .trip-record-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .trip-record-counts {
+    flex: 1;
+    justify-content: space-around;
+    gap: 12px;
+  }
+
+  .trip-record-detail {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+/* =========================================
+   운행 관리 B안 - 상태별 필터 탭
+========================================= */
+
+.trip-status-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.trip-status-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 20px;
+  border: 1px solid #e4eaf2;
+  border-radius: 999px;
+  background: #fff;
+  color: #62748b;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.trip-status-tab:hover:not(:disabled):not(.active) {
+  background: #edf4ff;
+  border-color: #c5d9f6;
+  color: #2468c9;
+}
+
+.trip-status-tab.active {
+  background: #2468e8;
+  border-color: #2468e8;
+  color: #fff;
+  box-shadow: 0 3px 9px rgba(36, 104, 232, 0.18);
+}
+
+.trip-status-tab:disabled {
+  background: #f4f6f9;
+  color: #a8b3c1;
+  border-color: #e9edf3;
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+/* 모바일 */
+@media (max-width: 600px) {
+  .trip-status-tabs {
+    gap: 8px;
+  }
+
+  .trip-status-tab {
+    padding: 9px 14px;
+    font-size: 12px;
+  }
+}
+
+/* 운행 관리 B안 - 검색 및 필터 */
+
+.trip-filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.trip-search-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 300px;
+  min-width: 240px;
+}
+
+.trip-search-form input {
+  flex: 1;
+  min-width: 0;
+  height: 43px;
+  padding: 0 14px;
+  border: 1px solid #dce5f0;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.trip-search-form input:focus {
+  outline: none;
+  border-color: #2468e8;
+  box-shadow: 0 0 0 3px rgba(36, 104, 232, 0.1);
+}
+
+.trip-search-form button {
+  height: 43px;
+  padding: 0 20px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.trip-filters > label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 155px;
+  color: #62748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.trip-filters > label select {
+  height: 43px;
+  min-width: 155px;
+  padding: 0 12px;
+  border: 1px solid #dce5f0;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 13px;
+}
+
+@media (max-width: 600px) {
+  .trip-search-form {
+    flex-basis: 100%;
+  }
+
+  .trip-filters > label {
+    flex: 1 1 140px;
+  }
+
+  .trip-filters > label select {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* 운행 관리 - 날짜 필터 */
+.trip-pagehead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.trip-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.trip-date-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trip-date-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #64748b);
+}
+
+.trip-date-form input[type="date"] {
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+}
+
+.trip-date-form input[type="date"]:focus {
+  outline: 2px solid #bfdbfe;
+  border-color: #3b82f6;
+}
+
+.trip-date-separator {
+  align-self: flex-end;
+  padding-bottom: 10px;
+  color: #94a3b8;
+}
+
+/* 모바일 화면 */
+@media (max-width: 768px) {
+  .trip-header-actions {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .trip-date-form {
+    width: 100%;
+  }
+
+  .trip-date-form label {
+    flex: 1 1 130px;
+  }
+
+  .trip-date-form input[type="date"] {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+.trip-summary-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  margin-bottom: 14px;
+}
+
+.trip-summary-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.trip-summary-heading .sub {
+  font-size: 12px;
+}
+
+.trip-record-driver {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+/* 운행 관리 - 등교/하교 배지 */
+.trip-type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.trip-type-badge.to-school {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.trip-type-badge.to-home {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* 운행 관리 - 차량번호, 기사, 시간 가로 배치 */
+.trip-record-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 7px;
+}
+
+.trip-record-plate,
+.trip-record-driver,
+.trip-record-time {
+  font-size: 13px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+/* 운행 카드 - 시간 및 시계 아이콘 */
+.trip-record-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.trip-record-time svg {
+  flex-shrink: 0;
+  color: #64748b;
+}
+
+/* 운행 상세 - 시간 아이콘 */
+.trip-detail-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.trip-detail-time svg {
+  flex-shrink: 0;
+  color: #64748b;
+}
+
+/* 운행 상세 - 검출 기록 목록 */
+.trip-event-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.trip-event-item {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.trip-event-thumb {
+  width: 112px;
+  height: 90px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+
+.trip-event-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.trip-event-no-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.trip-event-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.trip-event-info h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.trip-event-time {
+  margin: 0 0 10px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.trip-event-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.trip-event-counts span {
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  font-size: 12px;
+  color: #334155;
+}
+
+.trip-event-note {
+  margin: 8px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .trip-event-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .trip-event-item {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .trip-event-thumb {
+    width: 88px;
+    height: 76px;
+  }
+}
+
+/* 운행 상세 - 사진 썸네일 버튼 */
+.trip-event-photo-btn {
+  display: block;
+  padding: 0;
+  border: 0;
+  cursor: zoom-in;
+}
+
+.trip-event-photo-btn:hover img {
+  transform: scale(1.05);
+}
+
+.trip-event-photo-btn img {
+  transition: transform 0.2s ease;
+}
+
+.trip-event-photo-btn:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 3px;
+}
+
+/* 사진 확대 모달 */
+.trip-photo-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.trip-photo-modal-content {
+  width: min(100%, 960px);
+  max-height: 95vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.trip-photo-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+}
+
+.trip-photo-modal-head h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.trip-photo-modal-close {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 26px;
+  cursor: pointer;
+}
+
+.trip-photo-modal-close:hover {
+  background: #e2e8f0;
+}
+
+.trip-photo-modal-content > img {
+  display: block;
+  width: 100%;
+  max-height: calc(95vh - 70px);
+  object-fit: contain;
+  background: #0f172a;
+}
+
+@media (max-width: 600px) {
+  .trip-photo-modal {
+    padding: 12px;
+  }
+
+  .trip-photo-modal-head {
+    padding: 10px 14px;
+  }
+}
+
+/* 대시보드 - 해결된 경고 */
+.dashboard-feed-icon.resolved {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+/* 대시보드 - 연결 요청 빈 상태 */
+.dashboard-empty-state {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: #64748b;
+}
+
+.dashboard-empty-state p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.dashboard-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 20px;
+  font-weight: 700;
+}
