@@ -3,6 +3,7 @@ from datetime import date, datetime
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile,
 )
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -62,6 +63,20 @@ async def read_image(image: UploadFile) -> bytes:
     if not data:
         raise HTTPException(400, "빈 파일입니다")
     return data
+
+
+async def run_detector(data: bytes, mock_count, mock_low_conf, default_count: int):
+    """YOLO 추론은 CPU 를 오래 잡으므로 스레드에서 실행 (SSE 등 다른 요청이 멈추지 않게).
+    real 모드에서 모델이 실패하면 가짜 숫자로 판정하지 않고 재촬영/직접 확인을 요구한다."""
+    dets, mode = await run_in_threadpool(
+        detect_people, data, mock_count, mock_low_conf, default_count
+    )
+    if mode == "mock-fallback":
+        raise HTTPException(
+            503,
+            "AI 인원 검출에 실패했습니다. 다시 촬영하거나 차량 내부를 직접 확인해 주세요.",
+        )
+    return dets, mode
 
 
 # ---------- 운행 시작 / 조회 ----------
@@ -196,7 +211,7 @@ async def boarding_photo(
         raise HTTPException(409, "이미 종점 사진이 처리되어 승차 사진을 다시 올릴 수 없습니다")
 
     data = await read_image(image)
-    dets, mode = detect_people(data, mock_count, mock_low_conf, default_count=t.expected_count or 0)
+    dets, mode = await run_detector(data, mock_count, mock_low_conf, t.expected_count or 0)
     person_count = len(dets)
     boarding_count = max(person_count - exclude_count, 0)
 
@@ -238,7 +253,7 @@ async def dropoff_photo(
         raise HTTPException(409, "승차 사진이 먼저 필요합니다")
 
     data = await read_image(image)
-    dets, mode = detect_people(data, mock_count, mock_low_conf, default_count=0)
+    dets, mode = await run_detector(data, mock_count, mock_low_conf, 0)
     person_count = len(dets)
     remaining = max(person_count - exclude_count, 0)
     low = low_conf_count(dets)
@@ -348,10 +363,12 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
                 detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다.",
             )
 
+
     t.status = TripStatus.CLOSED
     t.confirm_method = body.method
     t.ended_at = datetime.now()
     db.commit()
+
 
     return {
         "id": t.id,
