@@ -82,7 +82,13 @@ class PushTokenRequest(BaseModel):
 
 # ---------- 공용 도구 ----------
 def user_to_dict(u: User) -> dict:
-    return {"id": u.id, "email": u.email, "name": u.name, "role": u.role.value}
+    return {
+        "id": u.id,
+        "email": u.email,
+        "name": u.name,
+        "role": u.role.value,
+        "created_at": u.created_at,
+    }
 
 
 def hash_password(plain: str) -> str:
