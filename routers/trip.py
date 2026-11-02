@@ -1,8 +1,10 @@
 from datetime import date, datetime
+import asyncio
 
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile,
 )
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,7 +16,7 @@ from models.models import (
     EventType, Trip, TripResult, TripStatus, User,
 )
 from services import event_bus, notifier, storage
-from services.detector import detect_people, low_conf_count
+from services.detector import DETECTOR_TIMEOUT_SEC, detect_people, low_conf_count
 from services.judge import judge
 from services.serializers import alert_to_dict, event_to_dict, trip_to_dict
 
@@ -62,6 +64,27 @@ async def read_image(image: UploadFile) -> bytes:
     if not data:
         raise HTTPException(400, "빈 파일입니다")
     return data
+
+
+async def run_detector(data: bytes, mock_count, mock_low_conf, default_count: int):
+    """YOLO 추론은 CPU 를 오래 잡으므로 스레드에서 실행 (SSE 등 다른 요청이 멈추지 않게).
+    실추론이 무한대기하면 HTTP 504로 처리해 브라우저의 receive timeout 을 피한다."""
+    try:
+        dets, mode = await asyncio.wait_for(
+            run_in_threadpool(detect_people, data, mock_count, mock_low_conf, default_count),
+            timeout=DETECTOR_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f"AI 검출이 너무 오래 걸립니다. 이미지 크기 또는 모델 상태를 확인해 주세요. (timeout={DETECTOR_TIMEOUT_SEC}s)",
+        )
+    if mode == "mock-fallback":
+        raise HTTPException(
+            503,
+            "AI 인원 검출에 실패했습니다. 다시 촬영하거나 차량 내부를 직접 확인해 주세요.",
+        )
+    return dets, mode
 
 
 # ---------- 운행 시작 / 조회 ----------
@@ -196,7 +219,7 @@ async def boarding_photo(
         raise HTTPException(409, "이미 종점 사진이 처리되어 승차 사진을 다시 올릴 수 없습니다")
 
     data = await read_image(image)
-    dets, mode = detect_people(data, mock_count, mock_low_conf, default_count=t.expected_count or 0)
+    dets, mode = await run_detector(data, mock_count, mock_low_conf, t.expected_count or 0)
     person_count = len(dets)
     boarding_count = max(person_count - exclude_count, 0)
 
@@ -238,7 +261,7 @@ async def dropoff_photo(
         raise HTTPException(409, "승차 사진이 먼저 필요합니다")
 
     data = await read_image(image)
-    dets, mode = detect_people(data, mock_count, mock_low_conf, default_count=0)
+    dets, mode = await run_detector(data, mock_count, mock_low_conf, 0)
     person_count = len(dets)
     remaining = max(person_count - exclude_count, 0)
     low = low_conf_count(dets)
@@ -348,10 +371,12 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
                 detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다.",
             )
 
+
     t.status = TripStatus.CLOSED
     t.confirm_method = body.method
     t.ended_at = datetime.now()
     db.commit()
+
 
     return {
         "id": t.id,
