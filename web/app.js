@@ -1928,6 +1928,7 @@
   // ======================================================================
   async function pageBuses() {
     const [buses, users, students] = await Promise.all([api('/web/buses'), api('/web/users'), api('/web/students')]);
+    window.busEditData = buses;
     const admins = users.filter((u) => u.role === 'ADMIN');
     const driverName = (id) => (admins.find((u) => u.id === id) || {}).name || '-';
     const assigned = await Promise.all(buses.map((b) => api(`/web/buses/${b.id}/students`)));
@@ -1942,7 +1943,46 @@
     ).length;
     const rows = buses.map((b, i) => `<tr><td>${esc(b.name)}</td><td>${esc(b.plate_no)}</td><td>${esc(driverName(b.driver_id))}</td>
       <td class="num">${b.student_count}</td>
-      <td class="wrap">${assigned[i].length ? assigned[i].map((s) => esc(s.name)).join(', ') : '<span class="muted-text">배정된 학생 없음</span>'}</td></tr>`).join('');
+      <td class="wrap">
+        ${assigned[i].length
+          ? assigned[i].map((s) => `
+              <span class="bus-assigned-student">
+                ${esc(s.name)}
+                <button
+                  type="button"
+                  class="btn bus-unassign-btn"
+                  data-act="bus-unassign"
+                  data-bus-id="${Number(b.id)}"
+                  data-student-id="${Number(s.id)}"
+                  data-student-name="${esc(s.name)}"
+                >배정 해제</button>
+              </span>
+            `).join(' ')
+          : '<span class="muted-text">배정된 학생 없음</span>'}
+      </td>
+      <td>
+        <button
+          type="button"
+          class="btn"
+          data-act="bus-edit"
+          data-bus-id="${Number(b.id)}"
+        >수정</button>
+      </td>
+    </tr>`).join('');
+
+    const assignedByBus = Object.fromEntries(
+      buses.map((b, i) => [
+        String(b.id),
+        assigned[i].map((s) => Number(s.id))
+      ])
+    );
+
+    const studentOptions = students.map((s) => ({
+      id: Number(s.id),
+      name: s.name,
+      class_name: s.class_name
+    }));
+
     return {
       html: `
         <header class="pagehead">
@@ -1995,8 +2035,8 @@
             전체 ${num(totalBuses)}대
           </span>
         </div>
-        <div class="tablewrap"><table><thead><tr><th>버스</th><th>차량번호</th><th>기사</th><th class="num">학생 수</th><th>탑승 예정 학생</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="5" class="empty">등록된 버스가 없습니다. 아래에서 버스를 등록하세요.</td></tr>'}</tbody></table></div>
+        <div class="tablewrap"><table><thead><tr><th>버스</th><th>차량번호</th><th>기사</th><th class="num">학생 수</th><th>탑승 예정 학생</th><th>관리</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" class="empty">등록된 버스가 없습니다. 아래에서 버스를 등록하세요.</td></tr>'}</tbody></table></div>
         <section class="student-registration" aria-label="버스 등록 및 학생 배정">
           <details class="registration-toggle">
             <summary>버스 등록 및 학생 배정 <span>클릭해서 펼치기</span></summary>
@@ -2005,15 +2045,58 @@
             <label>이름<input name="name" required placeholder="예: 1호차" maxlength="50"></label>
             <label>차량번호<input name="plate_no" required placeholder="예: 12가3456" maxlength="30"></label>
             <label>기사<select name="driver_id"><option value="">지정 안 함</option>${options(admins, (u) => u.id, (u) => u.name)}</select></label>
-            <button type="submit" class="btn primary">버스 등록</button></form>
+            <button type="submit" class="btn primary">버스 등록</button>
+            <button type="button" class="btn" data-act="bus-edit-cancel" hidden>수정 취소</button>
+            </form>
           <form data-form="assign"><h2>탑승 학생 배정</h2>
             <label>버스<select name="bus_id" required><option value="">선택</option>${options(buses, (b) => b.id, (b) => `${b.name} ${b.plate_no}`)}</select></label>
-            <label>학생<select name="student_id" required><option value="">선택</option>${options(students, (s) => s.id, (s) => `${s.name}${s.class_name ? ` (${s.class_name})` : ''}`)}</select></label>
+            <label>학생
+              <select name="student_id" required>
+                <option value="">먼저 버스를 선택하세요</option>
+              </select>
+            </label>
             <button type="submit" class="btn primary">학생 배정</button></form>
                 </div>
               </details>
             </section>`,
-    };
+        after: () => {
+          const form = document.querySelector('form[data-form="assign"]');
+          if (!form) return;
+
+          const busSelect = form.querySelector('[name="bus_id"]');
+          const studentSelect = form.querySelector('[name="student_id"]');
+
+          const updateStudents = () => {
+            const busId = busSelect.value;
+            const taken = new Set(assignedByBus[busId] || []);
+
+            studentSelect.replaceChildren();
+
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = busId
+              ? '학생 선택'
+              : '먼저 버스를 선택하세요';
+            studentSelect.appendChild(placeholder);
+
+            if (!busId) return;
+
+            for (const student of studentOptions) {
+              if (taken.has(student.id)) continue;
+
+              const option = document.createElement('option');
+              option.value = String(student.id);
+              option.textContent = student.name +
+                (student.class_name ? ` (${student.class_name})` : '');
+
+              studentSelect.appendChild(option);
+            }
+          };
+
+          busSelect.addEventListener('change', updateStudents);
+          updateStudents();
+        }
+      };
   }
 
   // ======================================================================
@@ -2051,7 +2134,29 @@
       return '보호자를 연결했습니다';
     },
     async bus(f) {
-      await api('/web/buses', { method: 'POST', body: { name: f.name, plate_no: f.plate_no, driver_id: f.driver_id ? Number(f.driver_id) : null } });
+      const busId = window.editingBusId;
+
+      const body = {
+        name: f.name,
+        plate_no: f.plate_no,
+        driver_id: f.driver_id ? Number(f.driver_id) : null
+      };
+
+      if (busId) {
+        await api(`/web/buses/${busId}`, {
+          method: 'PUT',
+          body
+        });
+
+        window.editingBusId = null;
+        return '버스 정보를 수정했습니다';
+      }
+
+      await api('/web/buses', {
+        method: 'POST',
+        body
+      });
+
       return '버스를 등록했습니다';
     },
     async assign(f) {
@@ -2215,10 +2320,89 @@
         toast(`${r.deleted}명을 삭제했습니다`);
         rosterState.edit = null;
         await route();
-      } catch (err) { if (err.message !== 'unauthorized') toast(err.message, 'error'); el.disabled = false; }
-    }
-  });
+       } catch (err) { if (err.message !== 'unauthorized') toast(err.message, 'error'); el.disabled = false; }
 
+      } else if (act === 'bus-edit-cancel') {
+        window.editingBusId = null;
+
+        const form = document.querySelector('form[data-form="bus"]');
+        if (!form) return;
+
+        form.reset();
+
+        const title = form.querySelector('h2');
+        const submitButton = form.querySelector('button[type="submit"]');
+        const cancelButton = form.querySelector('[data-act="bus-edit-cancel"]');
+
+        if (title) title.textContent = '버스 등록';
+        if (submitButton) submitButton.textContent = '버스 등록';
+        if (cancelButton) cancelButton.hidden = true;
+
+       } else if (act === 'bus-edit') {
+          const busId = Number(el.dataset.busId);
+          const bus = window.busEditData?.find((b) => Number(b.id) === busId);
+
+          if (!bus) {
+            toast('버스 정보를 찾을 수 없습니다', 'error');
+            return;
+          }
+
+          window.editingBusId = busId;
+
+          const form = document.querySelector('form[data-form="bus"]');
+
+          if (!form) {
+            toast('버스 등록 폼을 찾을 수 없습니다', 'error');
+            return;
+          }
+
+          form.closest('details')?.setAttribute('open', '');
+
+          form.elements.name.value = bus.name || '';
+          form.elements.plate_no.value = bus.plate_no || '';
+          form.elements.driver_id.value = bus.driver_id ?? '';
+
+          const title = form.querySelector('h2');
+          const submitButton = form.querySelector('button[type="submit"]');
+
+          if (title) title.textContent = '버스 정보 수정';
+          if (submitButton) submitButton.textContent = '수정 저장';
+
+          const cancelButton = form.querySelector('[data-act="bus-edit-cancel"]');
+          if (cancelButton) cancelButton.hidden = false;
+
+          form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        } else if (act === 'bus-unassign') {
+        const busId = Number(el.dataset.busId);
+        const studentId = Number(el.dataset.studentId);
+        const studentName = el.dataset.studentName || '선택한 학생';
+
+        if (!Number.isSafeInteger(busId) || busId <= 0 ||
+            !Number.isSafeInteger(studentId) || studentId <= 0) {
+          toast('배정 정보가 올바르지 않습니다', 'error');
+          return;
+        }
+
+        if (!window.confirm(`${studentName} 학생의 버스 배정을 해제할까요?`)) return;
+
+        el.disabled = true;
+
+        try {
+          await api(`/web/buses/${busId}/students/${studentId}`, {
+            method: 'DELETE'
+          });
+
+          toast(`${studentName} 학생의 버스 배정을 해제했습니다`);
+          await route();
+        } catch (err) {
+          if (err.message !== 'unauthorized') {
+            toast(err.message, 'error');
+          }
+          el.disabled = false;
+        }
+      }
+    });
   document.addEventListener('change', (e) => {
     const k = e.target.dataset && e.target.dataset.filter;
     if (!k) return;
