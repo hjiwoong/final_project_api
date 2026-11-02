@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from fastapi import (
-    APIRouter, Depends, File, Form, HTTPException, Query, UploadFile,
+    APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile,
 )
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from core.security import require_admin
 from database.db_connection import get_db
 from models.models import (
-    Alert, AlertStatus,
+    Alert, AlertStatus, Notification,
     Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod,
     EventType, Trip, TripResult, TripStatus, User,
 )
@@ -118,6 +118,37 @@ def current_trip(me: User = Depends(require_admin), db: Session = Depends(get_db
     if not t:
         raise HTTPException(404, "진행 중인 운행이 없습니다")
     return trip_to_dict(t)
+
+
+@router.delete("/{trip_id}", status_code=204)
+def cancel_trip(
+    trip_id: int,
+    me: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """진행 중 운행 취소. 운행과 관련된 이벤트·경고·알림 기록도 함께 삭제한다."""
+    t = get_trip_or_404(db, trip_id)
+    if t.driver_id != me.id:
+        raise HTTPException(404, "운행을 찾을 수 없습니다")
+    if t.status != TripStatus.IN_PROGRESS:
+        raise HTTPException(409, "진행 중인 운행만 취소할 수 있습니다")
+
+    alert_ids = [
+        row[0] for row in db.query(Alert.id).filter(Alert.trip_id == t.id).all()
+    ]
+    if alert_ids:
+        db.query(Notification).filter(
+            Notification.alert_id.in_(alert_ids)
+        ).delete(synchronize_session=False)
+        db.query(Alert).filter(Alert.id.in_(alert_ids)).delete(
+            synchronize_session=False
+        )
+    db.query(BoardingEvent).filter(
+        BoardingEvent.trip_id == t.id
+    ).delete(synchronize_session=False)
+    db.delete(t)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get("")
@@ -288,7 +319,7 @@ async def dropoff_photo(
 # ---------- 운행 종료 ----------
 @router.post("/{trip_id}/confirm")
 def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db)):
-    """하차 확인 후 운행 종료. 결과가 OK 가 아니면 409"""
+    """하차 결과와 미해결 경고를 확인한 뒤 운행을 종료한다."""
     t = get_trip_or_404(db, trip_id)
     if t.status == TripStatus.CLOSED:
         raise HTTPException(409, "이미 종료된 운행입니다")
@@ -322,24 +353,22 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
             db.query(Alert)
             .filter(
                 Alert.trip_id == trip_id,
-                Alert.status != AlertStatus.RESOLVED
+                Alert.status != AlertStatus.RESOLVED,
             )
             .first()
         )
-
         if unresolved_alert:
             raise HTTPException(
                 status_code=409,
-                detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다."
+                detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다.",
             )
 
-    # 결과가 OK 이거나, 미하차 의심 경고가 모두 해결된 경우 종료 허용
-    # (이전 코드는 이 부분이 if 안에 있어서 결과가 OK 인 정상 운행이 종료되지 않았음)
+
     t.status = TripStatus.CLOSED
     t.confirm_method = body.method
-    # 시뮬레이션 여부는 운행 시작 시 결정하며 종료 시 변경하지 않는다.
     t.ended_at = datetime.now()
     db.commit()
+
 
     return {
         "id": t.id,
@@ -348,4 +377,3 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
         "confirm_method": t.confirm_method.value,
         "ended_at": t.ended_at,
     }
-
