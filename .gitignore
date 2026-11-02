@@ -25,3 +25,8 @@ web/style_backup.css
 
 # Local YOLO model
 yolov8n.pt
+
+# weights/
+diag_images/
+diag_out/
+check_server_model.py
