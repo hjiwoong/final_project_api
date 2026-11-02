@@ -646,7 +646,20 @@
     };
   }
 
-  const imgUrl = (eventId) => `/events/${eventId}/image?token=${encodeURIComponent(token)}`;
+  async function fetchPhotoUrl(eventId) {
+    const response = await fetch(`/events/${eventId}/image`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`사진 조회 실패 (${response.status})`);
+    }
+
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  }
 
   function eventList(events) {
     if (!events.length) {
@@ -670,7 +683,7 @@
                   aria-label="${esc(label)} 사진 확대"
                 >
                   <img
-                    src="${imgUrl(e.id)}"
+                    data-photo-id="${Number(e.id)}"
                     alt="${esc(label)} 실내 사진"
                     loading="lazy"
                   >
@@ -709,7 +722,40 @@
     `;
   }
 
-   function openTripPhoto(photoId, label) {
+  async function loadEventPhotos() {
+    const images = document.querySelectorAll(
+      '.trip-event-photo-btn img[data-photo-id]'
+    );
+
+    for (const img of images) {
+      const eventId = Number(img.dataset.photoId);
+
+      try {
+        const url = await fetchPhotoUrl(eventId);
+
+        if (!img.isConnected) {
+          URL.revokeObjectURL(url);
+          continue;
+        }
+
+        img.addEventListener('load', () => {
+          URL.revokeObjectURL(url);
+        }, { once: true });
+
+        img.addEventListener('error', () => {
+          URL.revokeObjectURL(url);
+        }, { once: true });
+
+        img.src = url;
+
+      } catch (err) {
+        console.error('이벤트 사진 로딩 실패:', err);
+        img.alt = '사진을 불러올 수 없습니다';
+      }
+    }
+  }
+
+   async function openTripPhoto(photoId, label) {
     const oldModal = document.querySelector('.trip-photo-modal');
     if (oldModal) oldModal.remove();
 
@@ -731,7 +777,6 @@
         </div>
 
         <img
-          src="${imgUrl(photoId)}"
           alt="${esc(label)} 실내 사진"
         >
       </div>
@@ -756,6 +801,32 @@
     });
 
     document.addEventListener('keydown', onKeyDown);
+
+    try {
+      const photoUrl = await fetchPhotoUrl(photoId);
+
+      if (!modal.isConnected) {
+        URL.revokeObjectURL(photoUrl);
+        return;
+      }
+
+      const img = modal.querySelector('img');
+
+      img.addEventListener('load', () => {
+        URL.revokeObjectURL(photoUrl);
+      }, { once: true });
+
+      img.addEventListener('error', () => {
+        URL.revokeObjectURL(photoUrl);
+      }, { once: true });
+
+      img.src = photoUrl;
+
+    } catch (err) {
+      console.error('확대 사진 로딩 실패:', err);
+      const img = modal.querySelector('img');
+      if (img) img.alt = '사진을 불러올 수 없습니다';
+    }
   }
 
   document.addEventListener('click', (e) => {
@@ -767,6 +838,8 @@
       btn.dataset.photoLabel || '검출 사진'
     );
   });
+
+
 
   async function pageTripDetail(id) {
     const [t, buses, users] = await Promise.all([
@@ -995,12 +1068,16 @@
   }
 
   function fixImages(root) {
-    root.querySelectorAll('img').forEach((img) => img.addEventListener('error', () => {
-      const s = document.createElement('span');
-      s.className = 'nophoto';
-      s.textContent = '사진을 불러올 수 없습니다';
-      img.replaceWith(s);
-    }));
+    root.querySelectorAll('img').forEach((img) => {
+      img.addEventListener('error', () => {
+        const s = document.createElement('span');
+        s.className = 'nophoto';
+        s.textContent = '사진을 불러올 수 없습니다';
+        img.replaceWith(s);
+      });
+    });
+
+    loadEventPhotos();
   }
 
   // ======================================================================
@@ -1488,18 +1565,21 @@
 
     const needStudents = !reqState.status || reqState.status === 'PENDING';
 
-    const [data, students] = await Promise.all([
+    const [data, students, pending, approved, rejected] = await Promise.all([
       api('/web/child-requests?' + p),
-      needStudents ? api('/web/students') : Promise.resolve([])
+      needStudents ? api('/web/students') : Promise.resolve([]),
+      api('/web/child-requests?status=PENDING&limit=1'),
+      api('/web/child-requests?status=APPROVED&limit=1'),
+      api('/web/child-requests?status=REJECTED&limit=1')
     ]);
 
     const studentLabel = (s) =>
       `${s.name}${s.class_name ? ` (${s.class_name})` : ' (반 없음)'}`;
 
     const counts = {
-      pending: data.items.filter(r => r.status === 'PENDING').length,
-      approved: data.items.filter(r => r.status === 'APPROVED').length,
-      rejected: data.items.filter(r => r.status === 'REJECTED').length
+      pending: pending.total,
+      approved: approved.total,
+      rejected: rejected.total
     };
 
     const card = (r) => {
@@ -2228,9 +2308,20 @@
     const a = document.activeElement;
     return a && $('#view').contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && (a.value || '').length > 0;
   }
-  function softRefresh() {                       // 입력 중인 내용이 지워지지 않게 건너뜀
+  function softRefresh() {
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => { if (!userIsTyping()) route(); }, 300);
+
+    const tryRefresh = () => {
+      if (userIsTyping()) {
+        refreshTimer = setTimeout(tryRefresh, 1000);
+        return;
+      }
+
+      refreshTimer = null;
+      route();
+    };
+
+    refreshTimer = setTimeout(tryRefresh, 300);
   }
 
   function onAlert(a) {
