@@ -53,18 +53,7 @@ def my_children(me: User = Depends(require_parent), db: Session = Depends(get_db
         .filter(Guardian.user_id == me.id)
         .all()
     )
-    children = []
-    for student in rows:
-        attendance = (
-            db.query(Attendance)
-            .filter(Attendance.student_id == student.id, Attendance.date == date.today())
-            .first()
-        )
-        children.append({
-            **student_to_dict(student),
-            "is_absent": attendance.is_absent if attendance else False,
-        })
-    return children
+    return [student_to_dict(s) for s in rows]
 
 
 @router.put("/me/children/{student_id}/attendance")
@@ -94,3 +83,39 @@ def set_attendance(
         db.add(Attendance(student_id=student_id, date=body.date, is_absent=body.is_absent))
     db.commit()
     return {"student_id": student_id, "date": body.date, "is_absent": body.is_absent}
+
+@router.get("/me/children/{student_id}/attendance")
+def get_attendance(
+    student_id: int,
+    date: date,
+    me: User = Depends(require_parent),
+    db: Session = Depends(get_db),
+):
+    """내 자녀의 특정 날짜 출석/결석 상태 조회"""
+
+    is_mine = (
+        db.query(Guardian)
+        .filter(
+            Guardian.user_id == me.id,
+            Guardian.student_id == student_id,
+        )
+        .first()
+    )
+
+    if not is_mine:
+        raise HTTPException(403, "내 자녀가 아닙니다")
+
+    attendance = (
+        db.query(Attendance)
+        .filter(
+            Attendance.student_id == student_id,
+            Attendance.date == date,
+        )
+        .first()
+    )
+
+    return {
+        "student_id": student_id,
+        "date": date,
+        "is_absent": attendance.is_absent if attendance else False,
+    }
