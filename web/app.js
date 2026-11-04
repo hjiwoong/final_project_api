@@ -683,7 +683,11 @@
                   aria-label="${esc(label)} 사진 확대"
                 >
                   <img
+
+                    src="${imgUrl(e.id)}"
+
                     data-photo-id="${Number(e.id)}"
+
                     alt="${esc(label)} 실내 사진"
                     loading="lazy"
                   >
@@ -722,6 +726,35 @@
     `;
   }
 
+
+   function openTripPhoto(photoId, label) {
+         const oldModal = document.querySelector('.trip-photo-modal');
+         if (oldModal) oldModal.remove();
+
+         const modal = document.createElement('div');
+         modal.className = 'trip-photo-modal';
+         modal.setAttribute('role', 'dialog');
+         modal.setAttribute('aria-modal', 'true');
+         modal.setAttribute('aria-label', `${label} 사진 확대`);
+
+         modal.innerHTML = `
+           <div class="trip-photo-modal-content">
+             <div class="trip-photo-modal-head">
+               <h3>${esc(label)}</h3>
+               <button
+                 type="button"
+                 class="trip-photo-modal-close"
+                 aria-label="사진 닫기"
+               >×</button>
+             </div>
+
+             <img
+          src="${imgUrl(photoId)}"
+
+          alt="${esc(label)} 실내 사진"
+        >
+      </div>
+    `;
   async function loadEventPhotos() {
     const images = document.querySelectorAll(
       '.trip-event-photo-btn img[data-photo-id]'
@@ -756,6 +789,7 @@
   }
 
    async function openTripPhoto(photoId, label) {
+
     const oldModal = document.querySelector('.trip-photo-modal');
     if (oldModal) oldModal.remove();
 
@@ -802,6 +836,7 @@
 
     document.addEventListener('keydown', onKeyDown);
 
+
     try {
       const photoUrl = await fetchPhotoUrl(photoId);
 
@@ -827,6 +862,7 @@
       const img = modal.querySelector('img');
       if (img) img.alt = '사진을 불러올 수 없습니다';
     }
+
   }
 
   document.addEventListener('click', (e) => {
@@ -838,6 +874,7 @@
       btn.dataset.photoLabel || '검출 사진'
     );
   });
+
 
 
 
@@ -1565,12 +1602,27 @@
 
     const needStudents = !reqState.status || reqState.status === 'PENDING';
 
+
+    const [data, students] = await Promise.all([
+      api('/web/child-requests?' + p),
+      needStudents ? api('/web/students') : Promise.resolve([])
+    ]);
+
+    const studentLabel = (s) =>
+      `${s.name}${s.class_name ? ` (${s.class_name})` : ' (반 없음)'}`;
+    const counts = {
+      pending: data.items.filter(r => r.status === 'PENDING').length,
+      approved: data.items.filter(r => r.status === 'APPROVED').length,
+      rejected: data.items.filter(r => r.status === 'REJECTED').length
+    };
+
     const [data, students, pending, approved, rejected] = await Promise.all([
       api('/web/child-requests?' + p),
       needStudents ? api('/web/students') : Promise.resolve([]),
       api('/web/child-requests?status=PENDING&limit=1'),
       api('/web/child-requests?status=APPROVED&limit=1'),
       api('/web/child-requests?status=REJECTED&limit=1')
+
     ]);
 
     const studentLabel = (s) =>
@@ -1580,6 +1632,7 @@
       pending: pending.total,
       approved: approved.total,
       rejected: rejected.total
+
     };
 
     const card = (r) => {
@@ -1991,7 +2044,7 @@
             <p class="sub">등록된 차량과 학생 탑승 배정 현황을 관리합니다.</p>
           </div>
         </header>
-      
+
         <div class="bus-summary-grid">
           <div class="bus-summary-card total">
             <div class="bus-summary-label">
@@ -2003,7 +2056,7 @@
             </div>
             <p>등록된 전체 차량</p>
           </div>
-        
+
           <div class="bus-summary-card assigned">
             <div class="bus-summary-label">
               <span>배정된 학생</span>
@@ -2014,7 +2067,7 @@
             </div>
             <p>버스에 배정된 학생</p>
           </div>
-        
+
           <div class="bus-summary-card unassigned">
             <div class="bus-summary-label">
               <span>미배정 학생</span>
@@ -2026,6 +2079,7 @@
             <p>버스 배정이 필요한 학생</p>
           </div>
         </div>
+
         <div class="bus-list-heading">
           <div>
             <h2>버스별 학생 배정 현황</h2>
@@ -2035,69 +2089,114 @@
             전체 ${num(totalBuses)}대
           </span>
         </div>
-        <div class="tablewrap"><table><thead><tr><th>버스</th><th>차량번호</th><th>기사</th><th class="num">학생 수</th><th>탑승 예정 학생</th><th>관리</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="6" class="empty">등록된 버스가 없습니다. 아래에서 버스를 등록하세요.</td></tr>'}</tbody></table></div>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>버스</th>
+                <th>차량번호</th>
+                <th>기사</th>
+                <th class="num">학생 수</th>
+                <th>탑승 예정 학생</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || '<tr><td colspan="5" class="empty">등록된 버스가 없습니다. 아래에서 버스를 등록하세요.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+
         <section class="student-registration" aria-label="버스 등록 및 학생 배정">
           <details class="registration-toggle">
-            <summary>버스 등록 및 학생 배정 <span>클릭해서 펼치기</span></summary>
+            <summary>
+              버스 등록 및 학생 배정
+              <span>클릭해서 펼치기</span>
+            </summary>
             <div class="forms">
-          <form data-form="bus"><h2>버스 등록</h2>
-            <label>이름<input name="name" required placeholder="예: 1호차" maxlength="50"></label>
-            <label>차량번호<input name="plate_no" required placeholder="예: 12가3456" maxlength="30"></label>
-            <label>기사<select name="driver_id"><option value="">지정 안 함</option>${options(admins, (u) => u.id, (u) => u.name)}</select></label>
-            <button type="submit" class="btn primary">버스 등록</button>
-            <button type="button" class="btn" data-act="bus-edit-cancel" hidden>수정 취소</button>
-            </form>
-          <form data-form="assign"><h2>탑승 학생 배정</h2>
-            <label>버스<select name="bus_id" required><option value="">선택</option>${options(buses, (b) => b.id, (b) => `${b.name} ${b.plate_no}`)}</select></label>
-            <label>학생
-              <select name="student_id" required>
-                <option value="">먼저 버스를 선택하세요</option>
-              </select>
-            </label>
-            <button type="submit" class="btn primary">학생 배정</button></form>
-                </div>
-              </details>
-            </section>`,
-        after: () => {
-          const form = document.querySelector('form[data-form="assign"]');
-          if (!form) return;
+              <form data-form="bus">
+                <h2>버스 등록</h2>
+                <label>
+                  이름
+                  <input name="name" required placeholder="예: 1호차" maxlength="50">
+                </label>
+                <label>
+                  차량번호
+                  <input name="plate_no" required placeholder="예: 12가3456" maxlength="30">
+                </label>
+                <label>
+                  기사
+                  <select name="driver_id">
+                    <option value="">지정 안 함</option>
+                    ${options(admins, (u) => u.id, (u) => u.name)}
+                  </select>
+                </label>
+                <button type="submit" class="btn primary">버스 등록</button>
+                <button type="button" class="btn" data-act="bus-edit-cancel" hidden>수정 취소</button>
+              </form>
 
-          const busSelect = form.querySelector('[name="bus_id"]');
-          const studentSelect = form.querySelector('[name="student_id"]');
+              <form data-form="assign">
+                <h2>탑승 학생 배정</h2>
+                <label>
+                  버스
+                  <select name="bus_id" required>
+                    <option value="">선택</option>
+                    ${options(buses, (b) => b.id, (b) => `${b.name} ${b.plate_no}`)}
+                  </select>
+                </label>
+                <label>
+                  학생
+                  <select name="student_id" required>
+                    <option value="">먼저 버스를 선택하세요</option>
+                  </select>
+                </label>
+                <button type="submit" class="btn primary">학생 배정</button>
+              </form>
+            </div>
+          </details>
+        </section>
+      `,
 
-          const updateStudents = () => {
-            const busId = busSelect.value;
-            const taken = new Set(assignedByBus[busId] || []);
+      // main 브랜치의 학생 선택 기능 추가
+      after: () => {
+        const form = document.querySelector('form[data-form="assign"]');
+        if (!form) return;
 
-            studentSelect.replaceChildren();
+        const busSelect = form.querySelector('[name="bus_id"]');
+        const studentSelect = form.querySelector('[name="student_id"]');
 
-            const placeholder = document.createElement('option');
-            placeholder.value = '';
-            placeholder.textContent = busId
-              ? '학생 선택'
-              : '먼저 버스를 선택하세요';
-            studentSelect.appendChild(placeholder);
+        const updateStudents = () => {
+          const busId = busSelect.value;
+          const taken = new Set(assignedByBus[busId] || []);
 
-            if (!busId) return;
+          studentSelect.replaceChildren();
 
-            for (const student of studentOptions) {
-              if (taken.has(student.id)) continue;
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = busId
+            ? '학생 선택'
+            : '먼저 버스를 선택하세요';
 
-              const option = document.createElement('option');
-              option.value = String(student.id);
-              option.textContent = student.name +
-                (student.class_name ? ` (${student.class_name})` : '');
+          studentSelect.appendChild(placeholder);
 
-              studentSelect.appendChild(option);
-            }
-          };
+          if (!busId) return;
 
-          busSelect.addEventListener('change', updateStudents);
-          updateStudents();
-        }
-      };
-  }
+          for (const student of studentOptions) {
+            if (taken.has(student.id)) continue;
+
+            const option = document.createElement('option');
+            option.value = String(student.id);
+            option.textContent = student.name +
+              (student.class_name ? ` (${student.class_name})` : '');
+
+            studentSelect.appendChild(option);
+          }
+        };
+
+        busSelect.addEventListener('change', updateStudents);
+        updateStudents();
+      }
+    };
 
   // ======================================================================
   // 폼 처리

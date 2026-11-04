@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import asyncio
 
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile,
@@ -15,7 +16,7 @@ from models.models import (
     EventType, Trip, TripResult, TripStatus, User,
 )
 from services import event_bus, notifier, storage
-from services.detector import detect_people, low_conf_count
+from services.detector import DETECTOR_TIMEOUT_SEC, detect_people, low_conf_count
 from services.judge import judge
 from services.serializers import alert_to_dict, event_to_dict, trip_to_dict
 
@@ -67,10 +68,19 @@ async def read_image(image: UploadFile) -> bytes:
 
 async def run_detector(data: bytes, mock_count, mock_low_conf, default_count: int):
     """YOLO 추론은 CPU 를 오래 잡으므로 스레드에서 실행 (SSE 등 다른 요청이 멈추지 않게).
-    real 모드에서 모델이 실패하면 가짜 숫자로 판정하지 않고 재촬영/직접 확인을 요구한다."""
-    dets, mode = await run_in_threadpool(
-        detect_people, data, mock_count, mock_low_conf, default_count
-    )
+
+    실추론이 무한대기하면 HTTP 504로 처리해 브라우저의 receive timeout 을 피한다."""
+    try:
+        dets, mode = await asyncio.wait_for(
+            run_in_threadpool(detect_people, data, mock_count, mock_low_conf, default_count),
+            timeout=DETECTOR_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f"AI 검출이 너무 오래 걸립니다. 이미지 크기 또는 모델 상태를 확인해 주세요. (timeout={DETECTOR_TIMEOUT_SEC}s)",
+        )
+
     if mode == "mock-fallback":
         raise HTTPException(
             503,
