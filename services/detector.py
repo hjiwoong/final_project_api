@@ -19,6 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MODE = os.getenv("DETECTOR_MODE", "mock").lower()
 
 
+
 def _normalize_model_path(raw_path: str) -> str:
     p = Path(raw_path.strip())
     return str(p if p.is_absolute() else (BASE_DIR / p).resolve())
@@ -60,6 +61,7 @@ YOLO_MODELS = MODEL_CANDIDATES
 # 실추론이 너무 느리면 이 시간을 초과했을 때 명시적으로 504 응답을 돌려준다.
 DETECTOR_TIMEOUT_SEC = float(os.getenv("DETECTOR_TIMEOUT_SEC", "12"))
 
+
 CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.25"))          # 이 이상만 사람으로 셈
 LOW_CONF_THRESHOLD = float(os.getenv("LOW_CONF_THRESHOLD", "0.5"))   # 이 미만이면 '신뢰도 낮음'
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.5"))             # 붙어 앉은 사람이 하나로 합쳐지면 올림
@@ -67,7 +69,9 @@ IMG_SIZE = int(os.getenv("IMG_SIZE", "640"))                         # 사람이
 
 log = logging.getLogger("detector")
 _model = None
+
 _model_path = None
+
 _person_classes: list[int] | None = None   # None 이면 모든 클래스를 사람으로 셈
 
 
@@ -116,6 +120,7 @@ def open_image(image_bytes: bytes):
     return ImageOps.exif_transpose(img).convert("RGB")
 
 
+
 def _real_detect(image_bytes: bytes) -> list[dict]:
     model = load_model()
     img = open_image(image_bytes)
@@ -127,6 +132,52 @@ def _real_detect(image_bytes: bytes) -> list[dict]:
         imgsz=IMG_SIZE,
         verbose=False,
     )[0]
+
+
+def load_model():
+    """모델을 메모리에 올린다. 서버 시작 시 한 번 부르면 첫 요청이 느려지지 않는다."""
+    global _model, _person_classes
+    if _model is not None:
+        return _model
+
+    from ultralytics import YOLO
+
+    _model = YOLO(YOLO_MODEL)
+    names = _model.names  # 예: {0: 'person'} 또는 COCO 80개 클래스
+
+    if len(names) == 1:
+        _person_classes = None                       # 클래스가 하나뿐 → 전부 사람
+    else:
+        ids = [i for i, n in names.items() if str(n).lower() == "person"]
+        _person_classes = ids or [0]
+
+    log.info("YOLO 로딩 완료: %s / 클래스 %s / 사람 클래스 %s",
+             YOLO_MODEL, names, _person_classes or "전체")
+    return _model
+
+
+def open_image(image_bytes: bytes):
+    """휴대폰 사진은 실제 픽셀은 옆으로 누워 있고 '회전 정보(EXIF)'만 붙어 있는 경우가 많다.
+    PIL 은 이 정보를 자동 적용하지 않아서, 그대로 넣으면 모델이 90도 돌아간 사진을 보게 된다.
+    (Roboflow 는 내보낼 때 Auto-Orient 로 이미 회전을 적용하므로 학습·평가 사진은 똑바로 서 있음)"""
+    from PIL import Image, ImageOps
+
+    img = Image.open(io.BytesIO(image_bytes))
+    return ImageOps.exif_transpose(img).convert("RGB")
+
+
+def _real_detect(image_bytes: bytes) -> list[dict]:
+    model = load_model()
+    img = open_image(image_bytes)
+    result = model.predict(
+        img,
+        classes=_person_classes,
+        conf=CONF_THRESHOLD,
+        iou=IOU_THRESHOLD,
+        imgsz=IMG_SIZE,
+        verbose=False,
+    )[0]
+
 
     dets = []
     for box in result.boxes:
@@ -148,6 +199,7 @@ def detect_people(
     if MODE == "real":
         try:
             return _real_detect(image_bytes), "real"
+
         except Exception as e:  # noqa: BLE001
             log.exception("real 검출 실패 → mock-fallback: %s", e)
             return _mock_detect(default_count), "mock-fallback"
@@ -173,6 +225,7 @@ def status() -> dict:
     """/health 등에서 상태 확인용"""
     return {
         "mode": MODE,
+
         "model_path": _model_path or YOLO_MODEL,
         "model_candidates": YOLO_MODELS,
         "model_exists": any(Path(p).exists() for p in YOLO_MODELS),

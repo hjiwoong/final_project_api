@@ -3457,4 +3457,21 @@ input[type="checkbox"] { display: inline-block; width: 1.1rem; height: 1.1rem; m
   color: #15803d;
   font-size: 20px;
   font-weight: 700;
+
+}
+
+/* 버스별 배정 학생 표시 */
+.bus-assigned-student {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 10px 4px 0;
+  white-space: nowrap;
+}
+
+/* 배정 해제 버튼 */
+.bus-unassign-btn {
+  padding: 5px 9px;
+  font-size: 12px;
+  border-radius: 6px;
 }
