@@ -3,7 +3,6 @@
 수신자
 - 관리자(ADMIN) 전체
 - 학부모: URGENT(미하차 의심)일 때만, 해당 버스 탑승 예정(오늘 결석 제외) 학생의 보호자
-TODO: LLM 요약 / Agent 발령 판단 / RAG 연동
 """
 import logging
 import os
