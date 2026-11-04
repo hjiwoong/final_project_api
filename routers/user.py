@@ -1,15 +1,17 @@
 import string
+from datetime import datetime, timedelta
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.security import create_access_token, get_current_user, require_admin
 from database.db_connection import get_db
-from models.models import ChildRequest, User, UserRole
+from models.models import ChildRequest, SocialAccount, User, UserRole
+from services.account_deletions import ACCOUNT_DELETION_GRACE_DAYS
 from services.child_requests import (
     MAX_CHILDREN_AT_SIGNUP, ChildInput, dedupe, make_requests, parent_request_dict,
 )
@@ -76,8 +78,20 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class CancelAccountDeletionRequest(BaseModel):
+    email: EmailStr
+    password: str | None = None
+    google_id_token: str | None = Field(default=None, min_length=10)
+
+    @model_validator(mode="after")
+    def require_one_credential(self):
+        if (self.password is None) == (self.google_id_token is None):
+            raise ValueError("비밀번호 또는 구글 ID 토큰 중 하나를 입력하세요")
+        return self
+
+
 class PushTokenRequest(BaseModel):
-    push_token: str
+    push_token: str = Field(min_length=1, max_length=512)
 
 
 # ---------- 공용 도구 ----------
@@ -120,6 +134,8 @@ def authenticate(db: Session, body: LoginRequest) -> User:
     u = find_user_by_email(db, body.email)
     if not u or not verify_password(body.password, u.password_hash):
         raise HTTPException(401, "이메일 또는 비밀번호가 올바르지 않습니다")
+    if u.deletion_requested_at is not None:
+        raise HTTPException(403, "계정 삭제 유예 중입니다. 계정 복구 API를 이용하세요")
     return u
 
 
@@ -142,6 +158,31 @@ def create_user_row(
         raise HTTPException(409, "이미 가입된 이메일입니다")
     db.refresh(u)
     return u
+
+
+def _account_for_deletion_recovery(body: CancelAccountDeletionRequest, db: Session) -> User:
+    if body.password is not None:
+        user = find_user_by_email(db, body.email)
+        if not user or not verify_password(body.password, user.password_hash):
+            raise HTTPException(401, "이메일 또는 인증 정보가 올바르지 않습니다")
+    else:
+        from services.google_auth import verify_google_id_token
+
+        google_user = verify_google_id_token(body.google_id_token)
+        if google_user["email"] != body.email.lower():
+            raise HTTPException(401, "이메일 또는 인증 정보가 올바르지 않습니다")
+        social_account = (
+            db.query(SocialAccount)
+            .filter_by(provider="google", subject=google_user["sub"])
+            .first()
+        )
+        user = db.get(User, social_account.user_id) if social_account else None
+        if not user:
+            raise HTTPException(401, "이메일 또는 인증 정보가 올바르지 않습니다")
+
+    if user.role != UserRole.PARENT:
+        raise HTTPException(403, "학부모 계정만 복구할 수 있습니다")
+    return user
 
 
 # ---------- 가입 / 로그인 (누구나) ----------
@@ -171,6 +212,81 @@ def web_login(body: LoginRequest, db: Session = Depends(get_db)):
     return auth_response(u)
 
 
+@router.post("/me/account-deletion", status_code=202)
+def request_account_deletion(
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """학부모 계정 삭제를 예약하고 30일 동안 복구 기회를 둔다"""
+    if me.role != UserRole.PARENT:
+        raise HTTPException(403, "학부모 계정만 삭제를 예약할 수 있습니다")
+    if me.deletion_requested_at is not None:
+        raise HTTPException(409, "이미 계정 삭제가 예약되어 있습니다")
+
+    now = datetime.now()
+    me.deletion_requested_at = now
+    db.commit()
+    return {
+        "status": "PENDING_DELETION",
+        "requested_at": now,
+        "scheduled_deletion_at": now + timedelta(days=ACCOUNT_DELETION_GRACE_DAYS),
+        "grace_period_days": ACCOUNT_DELETION_GRACE_DAYS,
+    }
+
+
+@router.post("/auth/account-deletion/status")
+def account_deletion_status(
+    body: CancelAccountDeletionRequest,
+    db: Session = Depends(get_db),
+):
+    """재인증 후 본인 계정의 삭제 유예 상태를 확인한다"""
+    user = _account_for_deletion_recovery(body, db)
+    requested_at = user.deletion_requested_at
+    scheduled_at = (
+        requested_at + timedelta(days=ACCOUNT_DELETION_GRACE_DAYS)
+        if requested_at else None
+    )
+    return {
+        "status": (
+            "DELETION_DUE" if scheduled_at and scheduled_at <= datetime.now()
+            else "PENDING_DELETION" if requested_at
+            else "ACTIVE"
+        ),
+        "requested_at": requested_at,
+        "scheduled_deletion_at": scheduled_at,
+        "grace_period_days": ACCOUNT_DELETION_GRACE_DAYS,
+    }
+
+
+@router.post("/auth/account-deletion/cancel")
+def cancel_account_deletion(
+    body: CancelAccountDeletionRequest,
+    db: Session = Depends(get_db),
+):
+    """비밀번호 또는 연결된 구글 계정으로 삭제 예약을 복구한다"""
+    verified_user = _account_for_deletion_recovery(body, db)
+    user = (
+        db.query(User)
+        .filter(User.id == verified_user.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if user is None:
+        raise HTTPException(401, "이메일 또는 인증 정보가 올바르지 않습니다")
+    if user.deletion_requested_at is None:
+        raise HTTPException(409, "삭제 예약된 계정이 아닙니다")
+    if user.deletion_requested_at + timedelta(days=ACCOUNT_DELETION_GRACE_DAYS) <= datetime.now():
+        raise HTTPException(410, "계정 복구 가능 기간이 만료되었습니다")
+
+    user.deletion_requested_at = None
+    db.commit()
+    db.refresh(user)
+    return {
+        **auth_response(user),
+        "deletion_cancelled": True,
+    }
+
+
 # ---------- 로그인한 사용자(관리자/학부모 공통) ----------
 @router.get("/me")
 def get_me(me: User = Depends(get_current_user)):
@@ -184,6 +300,15 @@ def put_push_token(
     db: Session = Depends(get_db),
 ):
     me.push_token = body.push_token
+    db.commit()
+
+
+@router.delete("/me/push-token", status_code=204)
+def delete_push_token(
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    me.push_token = None
     db.commit()
 
 

@@ -3,16 +3,21 @@
 수신자
 - 관리자(ADMIN) 전체
 - 학부모: URGENT(미하차 의심)일 때만, 해당 버스 탑승 예정(오늘 결석 제외) 학생의 보호자
-TODO: LLM 요약 / Agent 발령 판단 / RAG 연동, FCM 푸시 발송
+TODO: LLM 요약 / Agent 발령 판단 / RAG 연동
 """
+import logging
+import os
 from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
+from database.db_connection import SessionLocal
 from models.models import (
     Alert, AlertLevel, AlertStatus, Attendance, BoardingEvent, BusStudent,
     Guardian, Notification, Trip, User, UserRole,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_summary(boarding: int, remaining: int, level: AlertLevel) -> str:
@@ -82,4 +87,81 @@ def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
 
     for uid in user_ids:
         db.add(Notification(alert_id=alert.id, user_id=uid, title=title, body=body))
-    # TODO: users.push_token 으로 FCM 푸시 발송
+
+
+def _firebase_messaging():
+    credentials_path = (
+        os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE")
+        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        or r"D:\secrets\final-project-b66de-firebase-adminsdk-fbsvc-c2cb0dc867.json"
+    )
+
+    from firebase_admin import credentials, get_app, initialize_app, messaging
+    from firebase_admin.exceptions import FirebaseError
+
+    try:
+        try:
+            app = get_app()
+        except ValueError:
+            app = initialize_app(credentials.Certificate(credentials_path))
+        return messaging, app
+    except (FirebaseError, OSError, ValueError):
+        logger.exception("Could not initialize Firebase Admin for FCM")
+        return None
+
+
+def send_alert_pushes(alert_id: int) -> None:
+    """Deliver committed alert notifications through FCM after the API response."""
+    firebase = _firebase_messaging()
+    if firebase is None:
+        return
+
+    from firebase_admin.exceptions import FirebaseError
+
+    messaging, app = firebase
+    with SessionLocal() as db:
+        targets = (
+            db.query(Notification.user_id, Notification.title, Notification.body, User.push_token)
+            .join(User, User.id == Notification.user_id)
+            .filter(Notification.alert_id == alert_id, User.push_token.isnot(None))
+            .all()
+        )
+
+    invalid_tokens: list[tuple[int, str]] = []
+    for user_id, title, body, token in targets:
+        try:
+            messaging.send(
+                messaging.Message(
+                    token=token,
+                    notification=messaging.Notification(title=title, body=body or ""),
+                    data={"type": "safety_alert", "alert_id": str(alert_id)},
+                    android=messaging.AndroidConfig(priority="high"),
+                    apns=messaging.APNSConfig(
+                        headers={"apns-priority": "10"},
+                        payload=messaging.APNSPayload(
+                            aps=messaging.Aps(sound="default"),
+                        ),
+                    ),
+                ),
+                app=app,
+            )
+        except FirebaseError as error:
+            logger.exception(
+                "FCM delivery failed for user_id=%s alert_id=%s",
+                user_id,
+                alert_id,
+            )
+            if getattr(error, "code", None) in {
+                "messaging/registration-token-not-registered",
+                "messaging/invalid-registration-token",
+            }:
+                invalid_tokens.append((user_id, token))
+
+    if invalid_tokens:
+        with SessionLocal() as db:
+            for user_id, token in invalid_tokens:
+                db.query(User).filter(
+                    User.id == user_id,
+                    User.push_token == token,
+                ).update({"push_token": None}, synchronize_session=False)
+            db.commit()

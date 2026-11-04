@@ -2,7 +2,7 @@ from datetime import date, datetime
 import asyncio
 
 from fastapi import (
-    APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile,
+    APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile,
 )
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -11,13 +11,14 @@ from sqlalchemy.orm import Session
 from core.security import require_admin
 from database.db_connection import get_db
 from models.models import (
-    Alert, AlertStatus, Notification,
-    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod,
-    EventType, Trip, TripResult, TripStatus, User,
+    Alert, AlertLevel, AlertStatus, Notification,
+    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod, EventType,
+    Guardian, Student, Trip, TripResult, TripStatus, User, UserRole,
 )
 from services import event_bus, notifier, storage
 from services.detector import DETECTOR_TIMEOUT_SEC, detect_people, low_conf_count
 from services.judge import judge
+from services.location_crypto import decrypt_coordinate_value, decrypt_location_value
 from services.serializers import alert_to_dict, event_to_dict, trip_to_dict
 
 # 운행 API 는 관리자(기사) 앱 전용
@@ -128,6 +129,84 @@ def current_trip(me: User = Depends(require_admin), db: Session = Depends(get_db
     if not t:
         raise HTTPException(404, "진행 중인 운행이 없습니다")
     return trip_to_dict(t)
+
+
+@router.get("/{trip_id}/boarding-map")
+def trip_boarding_map(
+    trip_id: int,
+    me: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """기사 본인 운행 버스에 배정된 학생과 보호자의 지도 위치를 반환한다."""
+    trip = get_trip_or_404(db, trip_id)
+    if trip.driver_id != me.id:
+        raise HTTPException(404, "운행을 찾을 수 없습니다")
+
+    students = (
+        db.query(Student)
+        .join(BusStudent, BusStudent.student_id == Student.id)
+        .filter(BusStudent.bus_id == trip.bus_id)
+        .order_by(Student.name, Student.id)
+        .all()
+    )
+    student_ids = [student.id for student in students]
+    absent_student_ids = set()
+    if student_ids:
+        absent_student_ids = {
+            student_id
+            for (student_id,) in (
+                db.query(Attendance.student_id)
+                .filter(
+                    Attendance.student_id.in_(student_ids),
+                    Attendance.date == date.today(),
+                    Attendance.is_absent.is_(True),
+                )
+                .all()
+            )
+        }
+
+    guardian_locations: dict[int, list[dict]] = {}
+    if student_ids:
+        guardians = (
+            db.query(
+                Guardian.student_id,
+                User.id,
+                User.address_encrypted,
+                User.latitude_encrypted,
+                User.longitude_encrypted,
+            )
+            .join(User, User.id == Guardian.user_id)
+            .filter(
+                Guardian.student_id.in_(student_ids),
+                User.role == UserRole.PARENT,
+            )
+            .order_by(Guardian.id)
+            .all()
+        )
+        for student_id, user_id, address, latitude, longitude in guardians:
+            if latitude is None or longitude is None:
+                continue
+            guardian_locations.setdefault(student_id, []).append({
+                "user_id": user_id,
+                "address": decrypt_location_value(address) if address is not None else None,
+                "latitude": decrypt_coordinate_value(latitude),
+                "longitude": decrypt_coordinate_value(longitude),
+            })
+
+    return {
+        "trip_id": trip.id,
+        "bus_id": trip.bus_id,
+        "students": [
+            {
+                "id": student.id,
+                "name": student.name,
+                "class_name": student.class_name,
+                "is_absent": student.id in absent_student_ids,
+                "guardian_locations": guardian_locations.get(student.id, []),
+            }
+            for student in students
+        ],
+    }
 
 
 @router.delete("/{trip_id}", status_code=204)
@@ -248,6 +327,7 @@ async def boarding_photo(
 @router.post("/{trip_id}/dropoff-photo")
 async def dropoff_photo(
     trip_id: int,
+    background_tasks: BackgroundTasks,
     image: UploadFile = File(...),
     captured_at: datetime = Form(...),
     exclude_count: int = Form(0, ge=0),
@@ -305,6 +385,8 @@ async def dropoff_photo(
         )
 
     db.commit()
+    if alert and alert.level == AlertLevel.URGENT:
+        background_tasks.add_task(notifier.send_alert_pushes, alert.id)
 
     # 실시간(SSE) 전송
     event_bus.publish("event", event_to_dict(ev))

@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 
 from core.security import require_admin
 from database.db_connection import get_db
-from models.models import Bus, BusStudent, Student
+from models.models import Bus, BusStudent, Guardian, Student, User, UserRole
+from services.location_crypto import decrypt_coordinate_value
 
 router = APIRouter(
     prefix="/web/buses",
@@ -48,6 +49,7 @@ def list_bus_students(bus_id: int, db: Session = Depends(get_db)):
         .filter(BusStudent.bus_id == bus_id)
         .all()
     )
+<<<<<<< HEAD
     return [{"id": s.id, "name": s.name, "class_name": s.class_name} for s in rows]
 
 @router.delete("/{bus_id}/students/{student_id}", status_code=204)
@@ -71,3 +73,49 @@ def unassign_student(
 
     db.delete(assignment)
     db.commit()
+=======
+    student_ids = [student.id for student in rows]
+    guardian_locations: dict[int, list[dict]] = {}
+    if student_ids:
+        guardians = (
+            db.query(
+                Guardian.student_id,
+                User.id,
+                User.latitude_encrypted,
+                User.longitude_encrypted,
+            )
+            .join(User, User.id == Guardian.user_id)
+            .filter(
+                Guardian.student_id.in_(student_ids),
+                User.role == UserRole.PARENT,
+            )
+            .order_by(Guardian.id)
+            .all()
+        )
+        for student_id, user_id, latitude, longitude in guardians:
+            guardian_locations.setdefault(student_id, []).append(
+                {
+                    "user_id": user_id,
+                    "latitude": (
+                        decrypt_coordinate_value(latitude)
+                        if latitude is not None
+                        else None
+                    ),
+                    "longitude": (
+                        decrypt_coordinate_value(longitude)
+                        if longitude is not None
+                        else None
+                    ),
+                }
+            )
+
+    return [
+        {
+            "id": student.id,
+            "name": student.name,
+            "class_name": student.class_name,
+            "guardian_locations": guardian_locations.get(student.id, []),
+        }
+        for student in rows
+    ]
+>>>>>>> 7c72627 (학부모 및 관리자 좌표 및 타 기기 지원에 대한 API 일부 수정)
