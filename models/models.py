@@ -76,6 +76,10 @@ class User(Base):
     name = Column(String(100), nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.PARENT)
     push_token = Column(String(512), nullable=True)
+    address_encrypted = Column(String(1024), nullable=True)
+    latitude_encrypted = Column(String(255), nullable=True)
+    longitude_encrypted = Column(String(255), nullable=True)
+    deletion_requested_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.now)
 
     guardians = relationship("Guardian", back_populates="user")

@@ -49,6 +49,8 @@ def get_current_user(
     user = db.get(User, _user_id_from_token(cred.credentials))
     if user is None:
         raise HTTPException(401, "존재하지 않는 사용자입니다")
+    if user.deletion_requested_at is not None:
+        raise HTTPException(403, "계정 삭제 유예 중입니다. 계정 복구 API를 이용하세요")
     return user
 
 

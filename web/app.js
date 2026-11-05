@@ -1972,8 +1972,45 @@
             <button type="submit" class="btn primary">보호자 연결</button></form>
      </div>
     </details>
+  </section>
+  <section class="parent-location-panel" aria-labelledby="parent-location-heading">
+    <h2 id="parent-location-heading">보호자 주소 확인</h2>
+    <p class="muted-text">선택한 보호자의 저장된 주소와 좌표를 조회합니다. 이 정보는 이 화면에서만 표시됩니다.</p>
+    <div class="parent-location-controls">
+      <label for="parent-location-user">보호자 계정
+        <select id="parent-location-user">
+          <option value="">보호자를 선택하세요</option>
+          ${options(parents, (u) => u.id, (u) => `${u.name} ${u.email}`)}
+        </select>
+      </label>
+      <button type="button" class="btn" data-act="parent-location-view">주소 조회</button>
+    </div>
+    <div id="parent-location-result" class="parent-location-result" aria-live="polite" hidden></div>
   </section>`,
     };
+  }
+
+  function renderParentLocation(location) {
+    const result = $('#parent-location-result');
+    if (!result) return;
+    const address = location.address || '주소 정보 없음';
+    const hasCoordinates = location.latitude != null && location.longitude != null
+      && Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude));
+    const latitude = hasCoordinates ? Number(location.latitude) : null;
+    const longitude = hasCoordinates ? Number(location.longitude) : null;
+    const coordinates = hasCoordinates
+      ? `${latitude}, ${longitude}` : '좌표 정보 없음';
+    const mapSearch = encodeURIComponent(hasCoordinates
+      ? `${latitude},${longitude}` : location.address || '');
+    result.innerHTML = `
+      <dl class="facts parent-location-facts">
+        <div><dt>주소</dt><dd>${esc(address)}</dd></div>
+        <div><dt>위도 · 경도</dt><dd>${esc(coordinates)}</dd></div>
+      </dl>
+      ${location.address || hasCoordinates
+        ? `<p><a class="btn small" href="https://map.naver.com/p/search/${mapSearch}" target="_blank" rel="noopener noreferrer">네이버 지도에서 보기</a></p>` : ''}
+    `;
+    result.hidden = false;
   }
 
   // ======================================================================
@@ -2363,7 +2400,32 @@
     const el = e.target.closest('[data-act], [data-dash-sim]');
     if (!el) return;
     const act = el.dataset.dashSim !== undefined ? 'dash-sim' : el.dataset.act;
-    if (act === 'period') {
+    if (act === 'parent-location-view') {
+      const select = $('#parent-location-user');
+      const userId = Number(select && select.value);
+      if (!Number.isInteger(userId) || userId < 1) {
+        toast('보호자 계정을 선택하세요.', 'error');
+        return;
+      }
+      const result = $('#parent-location-result');
+      result.hidden = false;
+      result.setAttribute('aria-busy', 'true');
+      result.textContent = '주소를 조회하고 있습니다.';
+      el.disabled = true;
+      try {
+        const location = await api(`/web/users/${encodeURIComponent(userId)}/location`);
+        if ($('#parent-location-user')?.value === String(userId)) renderParentLocation(location);
+      } catch (err) {
+        if (err.message !== 'unauthorized' && $('#parent-location-user')?.value === String(userId)) {
+          result.textContent = err.message.includes('(404)')
+            ? '주소 정보를 찾을 수 없습니다. 대상이 보호자 계정인지 확인하세요.'
+            : '주소 조회에 실패했습니다. 잠시 후 다시 시도하세요.';
+        }
+      } finally {
+        result.removeAttribute('aria-busy');
+        el.disabled = false;
+      }
+    } else if (act === 'period') {
       dashPeriod = el.dataset.value;
       route();
     } else if (act === 'dash-sim') {
@@ -2503,6 +2565,14 @@
       }
     });
   document.addEventListener('change', (e) => {
+    if (e.target.id === 'parent-location-user') {
+      const result = $('#parent-location-result');
+      if (result) {
+        result.hidden = true;
+        result.replaceChildren();
+      }
+      return;
+    }
     const k = e.target.dataset && e.target.dataset.filter;
     if (!k) return;
     if (k === 'trips-result') { tripsState.result = e.target.value; tripsState.offset = 0; }
