@@ -61,9 +61,6 @@ def my_children(
         .filter(Guardian.user_id == me.id)
         .all()
     )
-<<<<<<< HEAD
-    return [student_to_dict(s) for s in rows]
-=======
     if not rows:
         return []
 
@@ -138,7 +135,6 @@ def my_children(
             "bus_status": trip_status,
         })
     return children
->>>>>>> 7c72627 (학부모 및 관리자 좌표 및 타 기기 지원에 대한 API 일부 수정)
 
 
 @router.get("/me/buses")

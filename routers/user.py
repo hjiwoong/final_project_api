@@ -1,5 +1,6 @@
 import string
 from datetime import datetime, timedelta
+from math import ceil
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
@@ -78,6 +79,27 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _new_password(cls, v: str) -> str:
+        return check_password(v)
+
+
+class AccountDeletionRequest(BaseModel):
+    current_password: str | None = Field(default=None, min_length=1)
+    google_id_token: str | None = Field(default=None, min_length=10)
+
+    @model_validator(mode="after")
+    def require_one_credential(self):
+        if (self.current_password is None) == (self.google_id_token is None):
+            raise ValueError("비밀번호 또는 구글 ID 토큰 중 하나를 입력하세요")
+        return self
+
+
 class CancelAccountDeletionRequest(BaseModel):
     email: EmailStr
     password: str | None = None
@@ -101,6 +123,7 @@ def user_to_dict(u: User) -> dict:
         "email": u.email,
         "name": u.name,
         "role": u.role.value,
+        "signup_method": u.signup_method or "UNKNOWN",
         "created_at": u.created_at,
     }
 
@@ -142,12 +165,19 @@ def authenticate(db: Session, body: LoginRequest) -> User:
 def create_user_row(
     db: Session, email: str, password: str, name: str, role: UserRole,
     children: list[ChildInput] | None = None,
+    signup_method: str = "APP",
 ) -> User:
     """계정 생성 공통 처리 (자녀 연결 신청이 있으면 같은 트랜잭션에서 함께 저장). 이미 있는 이메일이면 409"""
     email = email.lower()
     if find_user_by_email(db, email):
         raise HTTPException(409, "이미 가입된 이메일입니다")
-    u = User(email=email, password_hash=hash_password(password), name=name, role=role)
+    u = User(
+        email=email,
+        password_hash=hash_password(password),
+        name=name,
+        role=role,
+        signup_method=signup_method,
+    )
     db.add(u)
     try:
         db.flush()                      # id 확보. 거의 동시에 같은 이메일이 들어오면 여기서 unique 제약에 걸린다
@@ -212,8 +242,26 @@ def web_login(body: LoginRequest, db: Session = Depends(get_db)):
     return auth_response(u)
 
 
+@router.put("/me/password")
+def change_password(
+    body: ChangePasswordRequest,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """현재 비밀번호를 검증한 뒤 로그인 계정의 비밀번호를 변경한다."""
+    if not verify_password(body.current_password, me.password_hash):
+        raise HTTPException(401, "현재 비밀번호가 올바르지 않습니다")
+    if body.current_password == body.new_password:
+        raise HTTPException(400, "새 비밀번호는 현재 비밀번호와 달라야 합니다")
+
+    me.password_hash = hash_password(body.new_password)
+    db.commit()
+    return {"status": "password_changed"}
+
+
 @router.post("/me/account-deletion", status_code=202)
 def request_account_deletion(
+    body: AccountDeletionRequest,
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -222,6 +270,22 @@ def request_account_deletion(
         raise HTTPException(403, "학부모 계정만 삭제를 예약할 수 있습니다")
     if me.deletion_requested_at is not None:
         raise HTTPException(409, "이미 계정 삭제가 예약되어 있습니다")
+    if body.current_password is not None:
+        if not verify_password(body.current_password, me.password_hash):
+            raise HTTPException(401, "현재 비밀번호가 올바르지 않습니다")
+    else:
+        from services.google_auth import verify_google_id_token
+
+        google_user = verify_google_id_token(body.google_id_token)
+        if google_user["email"] != me.email.lower():
+            raise HTTPException(401, "Google 인증 정보가 올바르지 않습니다")
+        social_account = (
+            db.query(SocialAccount)
+            .filter_by(provider="google", subject=google_user["sub"], user_id=me.id)
+            .first()
+        )
+        if not social_account:
+            raise HTTPException(401, "이 계정에 연결된 Google 인증 정보가 없습니다")
 
     now = datetime.now()
     me.deletion_requested_at = now
@@ -246,6 +310,10 @@ def account_deletion_status(
         requested_at + timedelta(days=ACCOUNT_DELETION_GRACE_DAYS)
         if requested_at else None
     )
+    days_remaining = (
+        max(0, ceil((scheduled_at - datetime.now()).total_seconds() / 86400))
+        if scheduled_at else 0
+    )
     return {
         "status": (
             "DELETION_DUE" if scheduled_at and scheduled_at <= datetime.now()
@@ -255,6 +323,7 @@ def account_deletion_status(
         "requested_at": requested_at,
         "scheduled_deletion_at": scheduled_at,
         "grace_period_days": ACCOUNT_DELETION_GRACE_DAYS,
+        "days_remaining": days_remaining,
     }
 
 
@@ -316,7 +385,12 @@ def delete_push_token(
 @router.post("/web/users", status_code=201, dependencies=[Depends(require_admin)])
 def create_user(body: UserCreate, db: Session = Depends(get_db)):
     """email, password, name, role -> user"""
-    return user_to_dict(create_user_row(db, body.email, body.password, body.name, body.role))
+    return user_to_dict(
+        create_user_row(
+            db, body.email, body.password, body.name, body.role,
+            signup_method="ADMIN",
+        )
+    )
 
 
 @router.get("/web/users", dependencies=[Depends(require_admin)])

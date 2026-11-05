@@ -49,9 +49,6 @@ def list_bus_students(bus_id: int, db: Session = Depends(get_db)):
         .filter(BusStudent.bus_id == bus_id)
         .all()
     )
-<<<<<<< HEAD
-    return [{"id": s.id, "name": s.name, "class_name": s.class_name} for s in rows]
-
 @router.delete("/{bus_id}/students/{student_id}", status_code=204)
 def unassign_student(
     bus_id: int,
@@ -73,7 +70,16 @@ def unassign_student(
 
     db.delete(assignment)
     db.commit()
-=======
+
+
+@router.get("/{bus_id}/students")
+def list_bus_students_with_guardian_locations(bus_id: int, db: Session = Depends(get_db)):
+    rows = (
+        db.query(Student)
+        .join(BusStudent, BusStudent.student_id == Student.id)
+        .filter(BusStudent.bus_id == bus_id)
+        .all()
+    )
     student_ids = [student.id for student in rows]
     guardian_locations: dict[int, list[dict]] = {}
     if student_ids:
@@ -118,4 +124,3 @@ def unassign_student(
         }
         for student in rows
     ]
->>>>>>> 7c72627 (학부모 및 관리자 좌표 및 타 기기 지원에 대한 API 일부 수정)

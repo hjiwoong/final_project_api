@@ -22,6 +22,7 @@ def init_db():
     }
     other_user_columns = {
         "deletion_requested_at": "DATETIME NULL",
+        "signup_method": "VARCHAR(20) NOT NULL DEFAULT 'UNKNOWN'",
     }
     with engine.begin() as connection:
         inspector = inspect(connection)

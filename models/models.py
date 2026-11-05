@@ -75,6 +75,9 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     name = Column(String(100), nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.PARENT)
+    signup_method = Column(
+        String(20), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
+    )
     push_token = Column(String(512), nullable=True)
     address_encrypted = Column(String(1024), nullable=True)
     latitude_encrypted = Column(String(255), nullable=True)
