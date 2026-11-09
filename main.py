@@ -15,13 +15,8 @@ from database.orm import init_db
 from services.detector import MODE as DETECTOR_MODE
 from services.account_deletions import delete_expired_accounts
 from routers import (
-<<<<<<< HEAD
-    alert, boarding_event, bus, bus_student, guardian,
-    notification, stats, student, trip, user, parent_bus
-=======
     alert, boarding_event, bus, bus_student, child_request, guardian, location,
-    notification, social, stats, student, student_admin, trip, user,
->>>>>>> 7c72627 (학부모 및 관리자 좌표 및 타 기기 지원에 대한 API 일부 수정)
+    notification, parent_bus, social, stats, student, student_admin, trip, user,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,13 +66,10 @@ app.include_router(trip.router)
 app.include_router(boarding_event.router)
 app.include_router(alert.router)
 app.include_router(notification.router)
-<<<<<<< HEAD
-=======
 app.include_router(child_request.router)
 app.include_router(location.router)
 app.include_router(social.router)
 app.include_router(student_admin.router)
->>>>>>> 7c72627 (학부모 및 관리자 좌표 및 타 기기 지원에 대한 API 일부 수정)
 app.include_router(stats.router)
 app.include_router(parent_bus.router)
 
