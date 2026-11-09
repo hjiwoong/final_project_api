@@ -140,7 +140,7 @@
 
   function chartSvg(daily) {
     if (!daily.length) {
-      return '<p class="empty">이 기간에 운행 기록이 없습니다.</p>';
+      return `<div class="dashboard-chart-empty" role="status"><span class="dashboard-chart-empty-icon" aria-hidden="true">▥</span><strong>아직 운행 데이터가 없습니다</strong><p>운행이 기록되면 이곳에 일별 운행 및 경고 추이가 표시됩니다.</p></div>`;
     }
 
     const W = 1000;
@@ -270,7 +270,7 @@
       api('/stats/summary?' + new URLSearchParams({ ...(from ? { from } : {}), simulation_mode: String(dashSimulation) })),
       api('/alerts?' + new URLSearchParams({ status: 'OPEN', limit: '5', simulation_mode: String(dashSimulation) })),
       api('/trips?' + new URLSearchParams({ limit: '100', ...(from ? { from } : {}), simulation_mode: String(dashSimulation) })),
-      api('/alerts?' + new URLSearchParams({ limit: '5', ...(from ? { from } : {}), simulation_mode: String(dashSimulation) })),
+      api('/alerts?' + new URLSearchParams({level: 'URGENT', limit: '5', ...(from ? { from } : {}), simulation_mode: String(dashSimulation)})),
       api('/web/buses'),
       api('/web/child-requests?status=PENDING&limit=4').catch(() => null),
       api('/trips?' + new URLSearchParams({ status: 'IN_PROGRESS', simulation_mode: String(dashSimulation), limit: '100' }))
@@ -348,8 +348,8 @@
         <div class="dashboard-bottom-grid">
           <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 위험 경고</h2><p>최근 발생한 경고 기록</p></div><a href="#/alerts">전체 보기 →</a></div><div class="dashboard-feed">${recentAlerts.map(a => `<a href="#/alerts/${a.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon ${a.status === 'RESOLVED' ? 'resolved' : 'danger'}">
             ${a.status === 'RESOLVED' ? '✓' : '!'}
-          </span><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<p class="empty">해당 기간 경고가 없습니다.</p>'}</div></section>
-          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 운행 기록</h2><p>최근 운행 결과 및 상태</p></div><a href="#/trips">전체 보기 →</a></div><div class="dashboard-feed">${recentTrips.map(t => `<a href="#/trips/${t.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon bus">🚌</span><span class="dashboard-feed-info"><strong>${esc(t.bus_name || '차량 정보 없음')}</strong><small>${fmtTime(t.started_at)} · 승차 ${num(t.boarding_count)}명 / 하차 ${num(t.alighted_count)}명</small></span><span class="dashboard-feed-tags">${tripStatus(t)}</span></a>`).join('') || '<p class="empty">해당 기간 운행 기록이 없습니다.</p>'}</div></section>
+          </span><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">✓</span><strong>최근 경고 없음</strong><small>선택한 기간에 발생한 경고가 없습니다.</small></div>'}</div></section>
+          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 운행 기록</h2><p>최근 운행 결과 및 상태</p></div><a href="#/trips">전체 보기 →</a></div><div class="dashboard-feed">${recentTrips.map(t => `<a href="#/trips/${t.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon bus">🚌</span><span class="dashboard-feed-info"><strong>${esc(t.bus_name || '차량 정보 없음')}</strong><small>${t.started_at ? esc(new Date(t.started_at).toLocaleString('ko-KR', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false})) : '시작 시간 미기록'}· 승차 ${num(t.boarding_count)}명 / 하차 ${num(t.alighted_count)}명</small></span><span class="dashboard-feed-tags">${tripStatus(t)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">▤</span><strong>운행 기록 없음</strong><small>운행이 시작되면 기록이 표시됩니다.</small></div>'}</div></section>
           <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>보호자 연결 요청</h2><p>승인을 기다리는 신청</p></div><a href="#/requests">전체 보기 →</a></div><div class="dashboard-feed">${requests ? (requests.items || []).map(r => `<a href="#/requests" class="dashboard-feed-row"><span class="dashboard-feed-icon person">♙</span><span class="dashboard-feed-info"><strong>${esc(r.user?.name || '신청자')}</strong><small>${esc(r.child_name || '학생 정보 없음')}${r.class_name ? ` (${esc(r.class_name)})` : ''} · ${fmtTime(r.created_at)}</small></span><span class="badge warn">승인 대기</span></a>`).join('') || '<div class="dashboard-empty-state"><span class="dashboard-empty-icon">✓</span><p>대기 중인 연결 요청이 없습니다.</p></div>'
       : '<div class="dashboard-empty-state"><p>연결 요청 정보를 불러올 수 없습니다.</p></div>'}</div></section>
         </div>
@@ -399,10 +399,20 @@
 
     const drivers = users.filter(u => u.role === 'ADMIN');
 
+    const fmtTripDate = (value) => {
+      if (!value) return '';
+
+      const date = new Date(value);
+
+      if (Number.isNaN(date.getTime())) return '';
+
+      return `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
+    };
+
     const stats = [
       ['전체 운행', summary.trip_count, '전체 운행 기록', 'bus'],
-      ['운행 중', summary.in_progress_count, '현재 진행 상태로 기록된 운행', 'running'],
-      ['정상 종료', summary.closed_count, '종료된 운행 기록', 'done'],
+      ['운행 중', summary.in_progress_count, '현재 진행 중인 운행', 'running'],
+      ['운행 완료', summary.closed_count, '완료된 운행 기록', 'done'],
       ['미하차 의심', summary.result_counts.MISSED || 0, '안전 확인이 필요한 운행', 'danger']
     ];
 
@@ -439,7 +449,7 @@
                 기사: ${esc(users.find(u => Number(u.id) === Number(t.driver_id))?.name || '미배정')}
               </span>
 
-              <span class="trip-record-time">
+             <span class="trip-record-time">
                 <svg
                   viewBox="0 0 24 24"
                   width="15"
@@ -455,6 +465,7 @@
                   <path d="M12 7v5l3 2"/>
                 </svg>
               
+                ${fmtTripDate(t.started_at || t.scheduled_start_at)}
                 ${fmtTripTime(t.started_at || t.scheduled_start_at)}
                 →
                 ${fmtTripTime(t.ended_at || t.scheduled_end_at)}
@@ -903,7 +914,7 @@
             <strong>긴급 안전 확인 필요</strong>
             <p>
               기록된 잔류 의심 ${num(remaining)}명 ·
-              열린 긴급 경고 ${num(urgentAlerts.length)}건
+              미해결 긴급 경고 ${num(urgentAlerts.length)}건
             </p>
             <a href="#/alerts/${urgentAlerts[0].id}">
               경고 상세 확인 →
@@ -911,40 +922,55 @@
           </div>
         </div>
       `
-      : t.result === 'MISSED'
+      : openAlerts.length > 0
         ? `
           <div class="trip-safety-panel warning">
             <div class="trip-safety-icon">⚠️</div>
             <div class="trip-safety-content">
-              <strong>미하차 의심 기록</strong>
+              <strong>안전 경고 확인 필요</strong>
               <p>
-                잔류 의심 ${num(remaining)}명 ·
-                현재 열린 긴급 경고는 없습니다.
+                미해결 경고 ${num(openAlerts.length)}건이 있습니다.
               </p>
+              <a href="#/alerts/${openAlerts[0].id}">
+                경고 상세 확인 →
+              </a>
             </div>
           </div>
         `
-        : `
-          <div class="trip-safety-panel safe">
-            <div class="trip-safety-icon">✓</div>
-            <div class="trip-safety-content">
-              <strong>
-                ${t.result === 'OK'
-                  ? '하차 확인 완료'
-                  : '열린 긴급 미하차 경고 없음'}
-              </strong>
-              <p>
-                ${t.result === 'OK'
-                  ? '기록된 운행 결과가 정상입니다.'
-                  : '운행 결과와 사진 기록을 확인해 주세요.'}
-              </p>
+        : t.result === 'MISSED'
+          ? `
+            <div class="trip-safety-panel warning">
+              <div class="trip-safety-icon">⚠️</div>
+              <div class="trip-safety-content">
+                <strong>미하차 의심 기록</strong>
+                <p>
+                  잔류 의심 ${num(remaining)}명 ·
+                  현재 미해결 경고는 없습니다.
+                </p>
+              </div>
             </div>
-          </div>
-        `;
+          `
+          : `
+            <div class="trip-safety-panel safe">
+              <div class="trip-safety-icon">✓</div>
+              <div class="trip-safety-content">
+                <strong>
+                  ${t.result === 'OK'
+                    ? '운행 결과 정상'
+                    : '현재 미해결 경고 없음'}
+                </strong>
+                <p>
+                  ${t.result === 'OK'
+                    ? '기록된 운행 결과가 정상이며, 현재 미해결 경고가 없습니다.'
+                    : '운행 결과와 사진 기록을 확인해 주세요.'}
+                </p>
+              </div>
+            </div>
+          `;
 
     const metrics = [
       {
-        label: '탑승 예정',
+        label: '배정 학생',
         value: t.expected_count,
         note: '배정 기준',
         type: 'expected'
@@ -1037,7 +1063,11 @@
               </div>
               <div>
                 <dt>차량번호</dt>
-                <dd>${esc(t.plate_no || bus?.plate_no || '미등록')}</dd>
+                <dd>
+                  <a href="#/trips/${t.id}">
+                    ${esc(t.plate_no || '차량번호 미등록')} →
+                  </a>
+                </dd>
               </div>
               <div>
                 <dt>담당 기사</dt>
@@ -1201,6 +1231,22 @@
         }))
       ]);
 
+    const unresolvedTotal = await Promise.all([
+      api('/alerts?' + new URLSearchParams({
+        limit: '1',
+        status: 'OPEN',
+        simulation_mode: mode
+      })),
+      api('/alerts?' + new URLSearchParams({
+        limit: '1',
+        status: 'ACKED',
+        simulation_mode: mode
+      }))
+    ]).then(([open, acked]) =>
+      (Number(open.total) || 0) +
+      (Number(acked.total) || 0)
+    );
+
     const stats = [
       {
         label: '전체 경고',
@@ -1210,23 +1256,33 @@
         icon: '◉'
       },
       {
-        label: '미확인 경고',
-        value: openSummary.total,
-        note: '관리자 확인이 필요한 경고',
+        label: '미해결 경고',
+        value: unresolvedTotal,
+        note: `${alertsState.simulation ? '시뮬레이션' : '실제 운행'} · 미확인 + 확인함`,
         type: 'open',
         icon: '!'
       },
       {
-        label: '긴급 경고',
+        label: '긴급 경고 이력',
         value: urgentSummary.total,
-        note: '긴급 수준으로 기록된 경고',
+        note: '해결 여부와 관계없이 발생한 긴급 경고',
         type: 'urgent',
         icon: '⚠'
       }
     ];
 
     const rows = data.items.map(a => `
-      <tr class="${a.level === 'URGENT' ? 'alert-urgent-row' : ''}">
+     <tr class="${
+        a.status === 'RESOLVED'
+          ? ''
+          : a.level === 'URGENT'
+            ? 'alert-urgent-row'
+            : a.status === 'OPEN'
+              ? 'alert-open-row'
+              : a.status === 'ACKED'
+                ? 'alert-acked-row'
+                : ''
+      }">
         <td>${badge(LEVEL, a.level)}</td>
         <td class="alert-message-cell">
           <a href="#/alerts/${a.id}">
@@ -1356,29 +1412,29 @@
     const isResolved = a.status === 'RESOLVED';
 
     const steps = [
-      `<li>
+      `<li class="history-step history-created">
         <span class="when">${fmtTime(a.created_at)}</span>
-        <strong>경고 발생</strong>
+        <div class="history-step-content"><strong>경고 발생</strong><p>안전 경고가 시스템에 등록되었습니다.</p></div>
       </li>`
     ];
 
     if (a.acked_at) {
       steps.push(`
-        <li>
+        <li class="history-step history-acked">
           <span class="when">${fmtTime(a.acked_at)}</span>
-          <strong>경고 확인</strong>
+          <div class="history-step-content"><strong>경고 확인</strong><p>관리자가 경고를 확인했습니다.</p></div>
         </li>
       `);
     }
 
     if (a.resolved_at) {
       steps.push(`
-        <li>
+        <li class="history-step history-resolved">
           <span class="when">${fmtTime(a.resolved_at)}</span>
-          <strong>해결 처리</strong>
+          <div class="history-step-content"><strong>해결 처리 완료</strong>
           ${a.note
             ? `<p class="alert-history-note">${esc(a.note)}</p>`
-            : ''}
+            : '<p>경고가 해결 상태로 변경되었습니다.</p>'}</div>
         </li>
       `);
     }
@@ -1410,9 +1466,24 @@
     `;
 
     const metrics = [
-      ['승차 인원', t.boarding_count, '승차 기록 기준', 'boarding'],
-      ['하차 인원', t.alighted_count, '하차 기록 기준', 'alighted'],
-      ['종점 잔류', t.remaining_count, '미하차 의심 인원', 'remaining']
+      [
+        '현재 승차 기록',
+        t?.boarding_count,
+        '현재 운행 데이터 기준',
+        'boarding'
+      ],
+      [
+        '현재 하차 기록',
+        t?.alighted_count,
+        '현재 운행 데이터 기준',
+        'alighted'
+      ],
+      [
+        '현재 종점 잔류',
+        t?.remaining_count,
+        '경고 발생 당시 인원과 다를 수 있음',
+        'remaining'
+      ]
     ];
 
     return {
@@ -1429,11 +1500,6 @@
               <p class="sub">
                 안전 경고의 발생 정보와 조치 내역을 확인합니다.
               </p>
-            </div>
-  
-            <div class="alert-detail-badges">
-              ${badge(LEVEL, a.level)}
-              ${badge(ALERT_STATUS, a.status)}
             </div>
           </header>
   
@@ -1468,29 +1534,22 @@
                   ${label}
                 </span>
                 <div class="alert-detail-metric-value">
-                  ${num(value)}<small>명</small>
+                  ${value == null ? '-' : num(value)}
+                  ${value == null ? '' : '<small>명</small>'}
                 </div>
                 <p>${note}</p>
               </div>
             `).join('')}
           </div>
   
+          <div class="alert-detail-workspace">
+          <div class="alert-detail-primary">
           <section class="alert-detail-section">
             <div class="alert-detail-section-head">
               <h2>경고 기본 정보</h2>
             </div>
   
             <dl class="alert-detail-facts">
-              <div>
-                <dt>경고 수준</dt>
-                <dd>${badge(LEVEL, a.level)}</dd>
-              </div>
-  
-              <div>
-                <dt>처리 상태</dt>
-                <dd>${badge(ALERT_STATUS, a.status)}</dd>
-              </div>
-  
               <div>
                 <dt>검출 신뢰도 낮음</dt>
                 <dd>
@@ -1501,11 +1560,13 @@
               </div>
   
               <div>
-                <dt>관련 운행</dt>
+                <dt>차량번호</dt>
                 <dd>
-                  <a href="#/trips/${t.id}">
-                    운행 #${t.id} 상세 보기 →
-                  </a>
+                  ${t ? `
+                    <a href="#/trips/${t.id}">
+                      ${esc(t.plate_no || '차량번호 미등록')} →
+                    </a>
+                  ` : '차량 정보 없음'}
                 </dd>
               </div>
             </dl>
@@ -1514,16 +1575,23 @@
           ${a.llm_summary ? `
             <section class="alert-detail-section">
               <div class="alert-detail-section-head">
-                <h2>AI 분석 요약</h2>
-                <span class="alert-detail-section-tag">AI 분석</span>
+                <h2>경고 발생 당시 AI 분석</h2>
+                <span class="alert-detail-section-tag">발생 시점</span>
               </div>
   
+              <p class="alert-detail-context-note">
+                아래 내용은 경고가 발생했을 당시의 분석 기록입니다.
+                위 인원 통계는 현재 운행 기록 기준으로,
+                경고 발생 당시 수치와 다를 수 있습니다.
+              </p>
               <div class="alert-detail-ai">
                 <p>${esc(a.llm_summary)}</p>
               </div>
             </section>
           ` : ''}
   
+          </div>
+          <div class="alert-detail-secondary">
           <section class="alert-detail-section">
             <div class="alert-detail-section-head">
               <h2>처리 이력</h2>
@@ -1537,6 +1605,8 @@
             </ul>
           </section>
   
+          </div>
+          </div>
           <div class="alert-detail-grid">
   
             ${!isResolved ? `
@@ -1841,7 +1911,32 @@
     const rows = data.items.map((s) => `<tr>
       <td><input type="checkbox" data-sel value="${s.id}" aria-label="${esc(s.name)} 선택"></td>
       <td><strong class="student-name">${esc(s.name)}</strong></td><td>${esc(s.class_name || '-')}</td>
-      <td class="wrap">${s.guardians.length ? s.guardians.map((g) => `${esc(g.name)}${g.relation ? `(${esc(g.relation)})` : ''}`).join(', ') : '<span class="muted-text">연결된 보호자 없음</span>'}</td>
+      <td class="student-guardian-cell">
+        ${s.guardians.length
+          ? `
+            <details class="student-guardian-details">
+              <summary>
+                보호자 ${s.guardians.length}명 보기
+                <span class="student-guardian-chevron" aria-hidden="true">⌄</span>
+              </summary>
+      
+              <div class="student-guardian-list">
+                ${s.guardians.map((g) => `
+                  <div class="student-guardian-item">
+                    <span class="student-guardian-name">
+                      ${esc(g.name)}
+                    </span>
+      
+                    <span class="student-guardian-relation">
+                      ${g.relation ? esc(g.relation) : '관계 미입력'}
+                    </span>
+                  </div>
+                `).join('')}
+              </div>
+            </details>
+          `
+          : '<span class="muted-text">연결된 보호자 없음</span>'}
+      </td>
       <td>${fmtDate(s.consent_at)}</td>
       <td class="rowact"><button type="button" class="btn small" data-act="roster-edit" data-id="${s.id}">수정</button>
         <button type="button" class="btn small danger" data-act="roster-del" data-id="${s.id}" data-name="${esc(s.name)}">삭제</button></td></tr>`).join('');
@@ -2031,34 +2126,58 @@
     const unassignedStudents = students.filter(
       (s) => !assignedIds.has(s.id)
     ).length;
-    const rows = buses.map((b, i) => `<tr><td>${esc(b.name)}</td><td>${esc(b.plate_no)}</td><td>${esc(driverName(b.driver_id))}</td>
-      <td class="num">${b.student_count}</td>
-      <td class="wrap">
-        ${assigned[i].length
-          ? assigned[i].map((s) => `
-              <span class="bus-assigned-student">
-                ${esc(s.name)}
-                <button
-                  type="button"
-                  class="btn bus-unassign-btn"
-                  data-act="bus-unassign"
-                  data-bus-id="${Number(b.id)}"
-                  data-student-id="${Number(s.id)}"
-                  data-student-name="${esc(s.name)}"
-                >배정 해제</button>
-              </span>
-            `).join(' ')
-          : '<span class="muted-text">배정된 학생 없음</span>'}
-      </td>
-      <td>
-        <button
-          type="button"
-          class="btn"
-          data-act="bus-edit"
-          data-bus-id="${Number(b.id)}"
-        >수정</button>
-      </td>
-    </tr>`).join('');
+    const rows = buses.map((b, i) => `
+      <tr>
+        <td>${esc(b.name)}</td>
+        <td>${esc(b.plate_no)}</td>
+        <td>${esc(driverName(b.driver_id))}</td>
+    
+        <td class="num">${assigned[i].length}</td>
+    
+        <td class="bus-student-cell">
+          ${assigned[i].length
+            ? `
+              <details class="bus-student-details">
+                <summary>
+                  학생 ${assigned[i].length}명 보기
+                  <span class="bus-student-chevron" aria-hidden="true">⌄</span>
+                </summary>
+    
+                <div class="bus-student-list">
+                  ${assigned[i].map((s) => `
+                    <div class="bus-student-item">
+                      <span class="bus-student-name">
+                        ${esc(s.name)}
+                      </span>
+    
+                      <button
+                        type="button"
+                        class="btn bus-unassign-btn"
+                        data-act="bus-unassign"
+                        data-bus-id="${Number(b.id)}"
+                        data-student-id="${Number(s.id)}"
+                        data-student-name="${esc(s.name)}"
+                      >
+                        배정 해제
+                      </button>
+                    </div>
+                  `).join('')}
+                </div>
+              </details>
+            `
+            : '<span class="muted-text">배정된 학생 없음</span>'}
+        </td>
+    
+        <td>
+          <button
+            type="button"
+            class="btn"
+            data-act="bus-edit"
+            data-bus-id="${Number(b.id)}"
+          >수정</button>
+        </td>
+      </tr>
+    `).join('');
 
     const assignedByBus = Object.fromEntries(
       buses.map((b, i) => [
@@ -2643,19 +2762,40 @@
 
   async function refreshBadge() {
     try {
-      const r = await api('/alerts?status=OPEN&limit=1');
+      const [open, acked] = await Promise.all([
+        api('/alerts?status=OPEN&limit=1'),
+        api('/alerts?status=ACKED&limit=1')
+      ]);
+
+      const unresolvedTotal =
+        (Number(open.total) || 0) +
+        (Number(acked.total) || 0);
+
       const el = $('#nav-alert-count');
-      el.textContent = r.total;
-      el.hidden = r.total === 0;
-      document.title = (r.total ? `(${r.total}) ` : '') + '통학버스 안전관리';
-    } catch { /* 배지는 실패해도 화면 사용에 지장 없음 */ }
-    try {
-      const q = await api('/web/child-requests?status=PENDING&limit=1');
-      const rel = $('#nav-request-count');
-      rel.textContent = q.total;
-      rel.hidden = q.total === 0;
-    } catch { /* 무시 */ }
+
+      el.textContent = unresolvedTotal;
+      el.hidden = unresolvedTotal === 0;
+
+      document.title =
+        (unresolvedTotal ? `(${unresolvedTotal}) ` : '') +
+        '통학버스 안전관리';
+
+    } catch {
+      /* 배지 조회 실패 시 다른 화면 기능은 유지 */
+    }
+
+  try {
+    const q = await api('/web/child-requests?status=PENDING&limit=1');
+
+    const rel = $('#nav-request-count');
+
+    rel.textContent = q.total;
+    rel.hidden = q.total === 0;
+
+  } catch {
+    /* 연결 요청 배지 조회 실패는 무시 */
   }
+}
 
   function userIsTyping() {
     const a = document.activeElement;
