@@ -485,7 +485,9 @@
           </div>
           <div>
             <span>잔류</span>
-            <strong>${num(t.remaining_count)}명</strong>
+            <strong class="${Number(t.remaining_count ?? 0) > 0 ? 'remaining-warning' : 'remaining-zero'}">
+              ${num(t.remaining_count)}명
+            </strong>
           </div>
         </div>
     
@@ -583,32 +585,27 @@
               운행 중
             </button>
           
-            <button type="button" class="trip-status-tab" disabled
-              title="운행 예정 기능은 추후 지원됩니다">
-              운행 예정
-            </button>
-          
             <button type="button"
               class="trip-status-tab ${tripsState.status === 'CLOSED' ? 'active' : ''}"
               data-act="trips-status-tab" data-status="CLOSED">
               운행 완료
             </button>
-          
-            <button type="button" class="trip-status-tab" disabled
-              title="운행 취소 기능은 추후 지원됩니다">
-              운행 취소
-            </button>
+         
           </div>
           
           <div class="filters trip-filters">
           <form class="trip-search-form" data-form="trip-search">
-            <input
-              type="search"
-              name="search"
-              placeholder="버스명, 차량번호, 기사 이름 검색"
-              aria-label="운행 기록 검색"
-              value="${esc(tripsState.search)}"
-            >
+            <label class="trip-search-field">
+              키워드 검색
+              <input
+                type="search"
+                name="search"
+                placeholder="버스명, 차량번호, 기사 이름 검색"
+                aria-label="운행 기록 검색"
+                value="${esc(tripsState.search)}"
+              >
+            </label>
+          
             <button type="submit" class="btn primary">검색</button>
           </form>
             <label>버스 선택
@@ -738,6 +735,21 @@
       '.trip-event-photo-btn img[data-photo-id]'
     );
 
+    function showPhotoError(img) {
+      const button = img.closest('.trip-event-photo-btn');
+      if (!button || !button.isConnected) return;
+
+      const placeholder = document.createElement('div');
+      placeholder.className =
+        'trip-event-thumb trip-event-no-image';
+
+      const message = document.createElement('span');
+      message.textContent = '사진을 불러올 수 없습니다';
+
+      placeholder.appendChild(message);
+      button.replaceWith(placeholder);
+    }
+
     for (const img of images) {
       const eventId = Number(img.dataset.photoId);
 
@@ -755,13 +767,14 @@
 
         img.addEventListener('error', () => {
           URL.revokeObjectURL(url);
+          showPhotoError(img);
         }, { once: true });
 
         img.src = url;
 
       } catch (err) {
         console.error('이벤트 사진 로딩 실패:', err);
-        img.alt = '사진을 불러올 수 없습니다';
+        showPhotoError(img);
       }
     }
   }
@@ -1153,7 +1166,7 @@
 
     const mode = String(alertsState.simulation);
 
-    const [data, summary, openSummary, urgentSummary] =
+    const [data, summary, urgentSummary] =
       await Promise.all([
         alertsState.status === 'UNRESOLVED'
           ? Promise.all([
@@ -1178,12 +1191,6 @@
 
         api('/alerts?' + new URLSearchParams({
           limit: '1',
-          simulation_mode: mode
-        })),
-
-        api('/alerts?' + new URLSearchParams({
-          limit: '1',
-          status: 'OPEN',
           simulation_mode: mode
         })),
 
@@ -1234,6 +1241,18 @@
       }
     ];
 
+    const alertStatusLabel = {
+      '': '전체',
+      UNRESOLVED: '미해결',
+      OPEN: '미확인',
+      ACKED: '확인함',
+      RESOLVED: '해결됨'
+    }[alertsState.status] ?? '전체';
+
+    const alertListDescription =
+      `${alertStatusLabel} 경고 ${num(data.total)}건 · ` +
+      `${alertsState.simulation ? '시뮬레이션' : '실제 운행'}`;
+
     const rows = data.items.map(a => `
      <tr class="${
         a.status === 'RESOLVED'
@@ -1248,8 +1267,26 @@
       }">
         <td>${badge(LEVEL, a.level)}</td>
         <td class="alert-message-cell">
-          <a href="#/alerts/${a.id}">
-            ${esc(a.message)}
+          <a href="#/alerts/${a.id}" class="alert-message-link">
+            ${(() => {
+              const message = a.message || '';
+              const separator = ' · ';
+              const index = message.indexOf(separator);
+        
+              if (index === -1) {
+                return `<strong>${esc(message)}</strong>`;
+              }
+        
+              const title = message.slice(0, index);
+              const description = message.slice(index + separator.length);
+        
+              return `
+                <strong>${esc(title)}</strong>
+                <span class="alert-message-description">
+                  ${esc(description)}
+                </span>
+              `;
+            })()}
           </a>
         </td>
         <td>${esc(a.bus_name || '-')}</td>
@@ -1299,7 +1336,7 @@
             <div class="alert-list-heading">
               <div>
                 <h2>안전 경고 목록</h2>
-                <p>선택한 조건에 맞는 경고 ${num(data.total)}건</p>
+                <p>${esc(alertListDescription)}</p>
               </div>
   
               <div class="seg" aria-label="운행 구분">
@@ -1349,20 +1386,26 @@
                   ${rows || `
                     <tr>
                       <td colspan="6" class="empty">
-                        조건에 맞는 경고가 없습니다.
+                        <div class="alert-empty-state">
+                          <div class="alert-empty-icon">✓</div>
+                          <strong>조건에 맞는 경고가 없습니다.</strong>
+                          <p>다른 처리 상태를 선택하거나 시뮬레이션 경고를 확인해 보세요.</p>
+                        </div>
                       </td>
                     </tr>
                   `}
                 </tbody>
-              </table>
-            </div>
+                </table>
+                </div>
   
-            ${pager(
-              data.total,
-              alertsState.offset,
-              ALERT_LIMIT,
-              'alerts'
-            )}
+            ${data.total > 0
+              ? pager(
+                  data.total,
+                  alertsState.offset,
+                  ALERT_LIMIT,
+                  'alerts'
+                )
+              : ''}
           </section>
         </div>
       `
@@ -1385,7 +1428,10 @@
       steps.push(`
         <li class="history-step history-acked">
           <span class="when">${fmtTime(a.acked_at)}</span>
-          <div class="history-step-content"><strong>경고 확인</strong><p>관리자가 경고를 확인했습니다.</p></div>
+          <div class="history-step-content">
+            <strong>관리자 확인 완료</strong>
+            <p>관리자가 경고를 확인했습니다.</p>
+          </div>
         </li>
       `);
     }
@@ -1428,23 +1474,27 @@
       </form>
     `;
 
+    const metricDescription = isResolved
+      ? '현재 운행 데이터 기준 · 경고 발생 당시 검출 결과와 다를 수 있습니다.'
+      : '현재 운행 데이터 기준 · 실제 안전 상태를 확인해 주세요.';
+
     const metrics = [
       [
         '현재 승차 기록',
         t?.boarding_count,
-        '현재 운행 데이터 기준',
+        metricDescription,
         'boarding'
       ],
       [
         '현재 하차 기록',
         t?.alighted_count,
-        '현재 운행 데이터 기준',
+        metricDescription,
         'alighted'
       ],
       [
         '현재 종점 잔류',
         t?.remaining_count,
-        '경고 발생 당시 인원과 다를 수 있음',
+        metricDescription,
         'remaining'
       ]
     ];
@@ -1677,10 +1727,12 @@
       if (r.status !== 'PENDING') {
         const tail = r.status === 'APPROVED'
           ? `연결된 학생: ${r.student ? esc(studentLabel(r.student)) : '-'}`
-          : `거절 사유: ${esc(r.reject_reason || '(없음)')}`;
+          : r.reject_reason?.trim()
+            ? `거절 사유: ${esc(r.reject_reason)}`
+            : '거절 사유가 등록되지 않았습니다.';
 
         return `
-          <li class="req req-v2 done">
+          <li class="req req-v2 done ${r.status === 'APPROVED' ? 'approved' : 'rejected'}">
             ${head}
             <div class="req-completed">
               <span class="req-completed-label">처리 결과</span>
@@ -1775,7 +1827,7 @@
               <div class="request-summary-value">
                 ${num(counts.pending)}<small>건</small>
               </div>
-              <p>현재 페이지의 승인 대기 요청</p>
+              <p>전체 승인 대기 요청</p>
             </div>
   
             <div class="request-summary-card approved">
@@ -1783,7 +1835,7 @@
               <div class="request-summary-value">
                 ${num(counts.approved)}<small>건</small>
               </div>
-              <p>현재 페이지의 승인 완료 요청</p>
+              <p>전체 승인 완료 요청</p>
             </div>
   
             <div class="request-summary-card rejected">
@@ -1791,7 +1843,7 @@
               <div class="request-summary-value">
                 ${num(counts.rejected)}<small>건</small>
               </div>
-              <p>현재 페이지의 거절된 요청</p>
+              <p>전체 거절된 요청</p>
             </div>
           </div>
   
@@ -1830,7 +1882,9 @@
                 </div>`
             }
   
-            ${pager(data.total, reqState.offset, REQ_LIMIT, 'requests')}
+            ${data.total > REQ_LIMIT
+              ? pager(data.total, reqState.offset, REQ_LIMIT, 'requests')
+              : ''}
           </section>
         </div>
       `
@@ -1884,7 +1938,11 @@
           `
           : '<span class="muted-text">연결된 보호자 없음</span>'}
       </td>
-      <td>${fmtDate(s.consent_at)}</td>
+      <td>
+        ${s.consent_at
+          ? fmtDate(s.consent_at)
+          : '<span class="muted-text">미등록</span>'}
+      </td>
       <td class="rowact"><button type="button" class="btn small" data-act="roster-edit" data-id="${s.id}">수정</button>
         <button type="button" class="btn small danger" data-act="roster-del" data-id="${s.id}" data-name="${esc(s.name)}">삭제</button></td></tr>`).join('');
 
@@ -1983,12 +2041,21 @@
         </form>
         ${editBox}
         <div class="bulkbar">
-          <button type="button" class="btn danger" data-act="roster-del-sel">선택한 학생 삭제</button>
+          <button
+            type="button"
+            class="btn danger"
+            data-act="roster-del-sel"
+            disabled
+          >
+            선택한 학생 0명 삭제
+          </button>
           ${classBtn}
         </div>
         <div class="tablewrap"><table><thead><tr><th><input type="checkbox" data-act="roster-selall" aria-label="이 페이지 전체 선택"></th><th>이름</th><th>반</th><th>보호자</th><th>보호자 동의일</th><th></th></tr></thead>
         <tbody>${rows || '<tr><td colspan="6" class="empty">조건에 맞는 학생이 없습니다. 아래에서 학생을 등록하세요.</td></tr>'}</tbody></table></div>
-        ${pager(data.total, rosterState.offset, ROSTER_LIMIT, 'roster')}
+        ${data.total > ROSTER_LIMIT
+          ? pager(data.total, rosterState.offset, ROSTER_LIMIT, 'roster')
+          : ''}
         <section class="student-registration" aria-label="학생·보호자 등록">
           <details class="registration-toggle">
             <summary>학생·보호자 등록 및 연결 <span>클릭해서 펼치기</span></summary>
@@ -2025,10 +2092,24 @@
     const [buses, users, students] = await Promise.all([api('/web/buses'), api('/web/users'), api('/web/students')]);
     window.busEditData = buses;
     const admins = users.filter((u) => u.role === 'ADMIN');
-    const driverName = (id) => (admins.find((u) => u.id === id) || {}).name || '-';
+    const driverName = (id) =>
+      admins.find((u) => Number(u.id) === Number(id))?.name || '미지정';
     const assigned = await Promise.all(buses.map((b) => api(`/web/buses/${b.id}/students`)));
     const assignedIds = new Set(
       assigned.flat().map((s) => s.id)
+    );
+
+    const assignmentCounts = new Map();
+
+    assigned.forEach((busStudents) => {
+      busStudents.forEach((s) => {
+        const id = Number(s.id);
+        assignmentCounts.set(id, (assignmentCounts.get(id) || 0) + 1);
+      });
+    });
+
+    const studentInfoById = new Map(
+      students.map((s) => [Number(s.id), s])
     );
 
     const totalBuses = buses.length;
@@ -2056,9 +2137,21 @@
                 <div class="bus-student-list">
                   ${assigned[i].map((s) => `
                     <div class="bus-student-item">
-                      <span class="bus-student-name">
-                        ${esc(s.name)}
-                      </span>
+                     <span class="bus-student-name">
+                        <strong>${esc(s.name)}</strong>
+                      
+                        ${studentInfoById.get(Number(s.id))?.class_name
+                          ? `<span class="bus-student-class">
+                              ${esc(studentInfoById.get(Number(s.id)).class_name)}
+                            </span>`
+                          : ''}
+                      
+                        ${assignmentCounts.get(Number(s.id)) > 1
+                          ? `<span class="bus-student-multiple">
+                              복수 배정
+                            </span>`
+                          : ''}
+                     </span>
     
                       <button
                         type="button"
@@ -2357,6 +2450,41 @@
     }
   });
 
+  // 학생 명부 선택 상태 갱신
+function updateRosterSelection() {
+  const checkboxes = [
+    ...document.querySelectorAll('input[data-sel]')
+  ];
+
+  const selectedCount = checkboxes.filter(
+    (checkbox) => checkbox.checked
+  ).length;
+
+  const deleteButton = document.querySelector(
+    '[data-act="roster-del-sel"]'
+  );
+
+  const selectAll = document.querySelector(
+    '[data-act="roster-selall"]'
+  );
+
+  if (deleteButton) {
+    deleteButton.disabled = selectedCount === 0;
+    deleteButton.textContent =
+      `선택한 학생 ${selectedCount}명 삭제`;
+  }
+
+  if (selectAll) {
+    selectAll.checked =
+      checkboxes.length > 0 &&
+      selectedCount === checkboxes.length;
+
+    selectAll.indeterminate =
+      selectedCount > 0 &&
+      selectedCount < checkboxes.length;
+  }
+}
+
   // ---------- 클릭 / 선택 위임 ----------
   document.addEventListener('click', async (e) => {
     // 대시보드 운행 카드 클릭 시 운행 유형 전달
@@ -2417,7 +2545,11 @@
     else if (act === 'roster-edit') { rosterState.edit = Number(el.dataset.id); route(); }
     else if (act === 'roster-cancel') { rosterState.edit = null; route(); }
     else if (act === 'roster-selall') {
-      document.querySelectorAll('input[data-sel]').forEach((c) => { c.checked = el.checked; });
+      document.querySelectorAll('input[data-sel]').forEach((c) => {
+        c.checked = el.checked;
+      });
+
+      updateRosterSelection();
     } else if (act === 'roster-del' || act === 'roster-del-sel' || act === 'roster-del-class') {
       let body, msg;
       if (act === 'roster-del') {
@@ -2523,6 +2655,11 @@
       }
     });
   document.addEventListener('change', (e) => {
+    if (e.target.matches('input[data-sel]')) {
+      updateRosterSelection();
+      return;
+    }
+
     const k = e.target.dataset && e.target.dataset.filter;
     if (!k) return;
     if (k === 'trips-result') { tripsState.result = e.target.value; tripsState.offset = 0; }
@@ -2594,8 +2731,8 @@
   async function refreshBadge() {
     try {
       const [open, acked] = await Promise.all([
-        api('/alerts?status=OPEN&limit=1'),
-        api('/alerts?status=ACKED&limit=1')
+        api('/alerts?status=OPEN&limit=1&simulation_mode=false'),
+        api('/alerts?status=ACKED&limit=1&simulation_mode=false')
       ]);
 
       const unresolvedTotal =
