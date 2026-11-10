@@ -3,7 +3,8 @@
 수신자
 - 관리자(ADMIN) 전체
 - 학부모: URGENT(미하차 의심)일 때만, 해당 버스 탑승 예정(오늘 결석 제외) 학생의 보호자
-TODO: LLM 요약 / Agent 발령 판단 / RAG 연동, FCM 푸시 발송
+LLM 요약은 services/llm_service.py, Agent 판단은 services/agent_service.py
+TODO: FCM 푸시 발송
 """
 from datetime import date, datetime
 
@@ -16,7 +17,8 @@ from models.models import (
 
 
 def build_summary(boarding: int, remaining: int, level: AlertLevel) -> str:
-    # TODO: 멀티모달 LLM 요약으로 교체
+    # 경고를 만들 때 즉시 쓰는 템플릿 요약.
+    # 응답 후 llm_service.enrich_alert_summary 가 LLM 문장을 덧붙여 갱신한다. (첫 줄은 이 문장과 같음)
     if level == AlertLevel.URGENT:
         return f"하차 후 {remaining}명 잔류 의심 · 승차 {boarding} / 잔류 {remaining}"
     return "사진의 검출 신뢰도가 낮아 재촬영 또는 관리자 확인이 필요합니다"

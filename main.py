@@ -12,9 +12,10 @@ from database.db_connection import get_db
 from database.orm import init_db
 from services.detector import MODE as DETECTOR_MODE
 from routers import (
-    alert, boarding_event, bus, bus_student, child_request, guardian,
-    notification, social, stats, student, student_admin, trip, user,
+    alert, boarding_event, bus, bus_student, chat, child_request, guardian,
+    notification, rag, social, stats, student, student_admin, trip, user,
 )
+from services import agent_service, chat_service, gemini_client, llm_service, rag_service
 
 
 @asynccontextmanager
@@ -46,13 +47,19 @@ app.include_router(child_request.router)
 app.include_router(social.router)
 app.include_router(student_admin.router)
 app.include_router(stats.router)
+app.include_router(rag.router)    # AI ③ RAG 대응 수칙
+app.include_router(chat.router)   # 챗봇
 
 
 @app.get("/health", tags=["시스템"])
 def health(db: Session = Depends(get_db)):
     """서버·DB 상태, detector_mode"""
     db.execute(text("SELECT 1"))
-    return {"status": "ok", "db": "connected", "detector_mode": DETECTOR_MODE}
+    return {
+        "status": "ok", "db": "connected", "detector_mode": DETECTOR_MODE,
+        "ai": {**gemini_client.status(), **llm_service.status(),
+               **agent_service.status(), **rag_service.status(), **chat_service.status()},
+    }
 
 
 # 관리자 웹 화면 (web/ 폴더) - 주소창에 직접 입력: http://127.0.0.1:8000/admin/  (API 문서는 /docs)
