@@ -75,7 +75,12 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     name = Column(String(100), nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.PARENT)
+    address_encrypted = Column(String(1024), nullable=True)
+    latitude_encrypted = Column(String(1024), nullable=True)
+    longitude_encrypted = Column(String(1024), nullable=True)
+    signup_method = Column(String(20), nullable=True)
     push_token = Column(String(512), nullable=True)
+    deletion_requested_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     guardians = relationship("Guardian", back_populates="user")
@@ -275,3 +280,13 @@ class Notification(Base):
 
     alert = relationship("Alert", back_populates="notifications")
     user = relationship("User", back_populates="notifications")
+
+
+class PushToken(Base):
+    """기기별 FCM 토큰. 같은 기기의 토큰은 계정 간 이동할 수 있다."""
+    __tablename__ = "push_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token = Column(String(512), nullable=False, unique=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

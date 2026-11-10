@@ -1,4 +1,5 @@
 import string
+from datetime import datetime
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.security import create_access_token, get_current_user, require_admin
 from database.db_connection import get_db
-from models.models import ChildRequest, User, UserRole
+from models.models import ChildRequest, PushToken, User, UserRole
 from services.child_requests import (
     MAX_CHILDREN_AT_SIGNUP, ChildInput, dedupe, make_requests, parent_request_dict,
 )
@@ -77,12 +78,32 @@ class LoginRequest(BaseModel):
 
 
 class PushTokenRequest(BaseModel):
-    push_token: str
+    push_token: str = Field(min_length=1, max_length=512)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _new_password(cls, value: str) -> str:
+        return check_password(value)
 
 
 # ---------- 공용 도구 ----------
 def user_to_dict(u: User) -> dict:
-    return {"id": u.id, "email": u.email, "name": u.name, "role": u.role.value}
+    signup_method = u.signup_method
+    if signup_method is None:
+        signup_method = "ADMIN" if u.role == UserRole.ADMIN else "LEGACY"
+    return {
+        "id": u.id,
+        "email": u.email,
+        "name": u.name,
+        "role": u.role.value,
+        "created_at": u.created_at,
+        "signup_method": signup_method,
+    }
 
 
 def hash_password(plain: str) -> str:
@@ -114,18 +135,27 @@ def authenticate(db: Session, body: LoginRequest) -> User:
     u = find_user_by_email(db, body.email)
     if not u or not verify_password(body.password, u.password_hash):
         raise HTTPException(401, "이메일 또는 비밀번호가 올바르지 않습니다")
+    if u.deletion_requested_at is not None:
+        raise HTTPException(403, "계정 삭제 유예 중입니다")
     return u
 
 
 def create_user_row(
     db: Session, email: str, password: str, name: str, role: UserRole,
     children: list[ChildInput] | None = None,
+    signup_method: str = "ADMIN",
 ) -> User:
     """계정 생성 공통 처리 (자녀 연결 신청이 있으면 같은 트랜잭션에서 함께 저장). 이미 있는 이메일이면 409"""
     email = email.lower()
     if find_user_by_email(db, email):
         raise HTTPException(409, "이미 가입된 이메일입니다")
-    u = User(email=email, password_hash=hash_password(password), name=name, role=role)
+    u = User(
+        email=email,
+        password_hash=hash_password(password),
+        name=name,
+        role=role,
+        signup_method=signup_method,
+    )
     db.add(u)
     try:
         db.flush()                      # id 확보. 거의 동시에 같은 이메일이 들어오면 여기서 unique 제약에 걸린다
@@ -145,7 +175,10 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
     - 비밀번호: 4자 이상 + 영문 대문자 + 특수문자 포함
     - children 에 자녀 이름·반·관계를 적어 보내면 '승인 대기' 요청이 만들어지고, 관리자가 확인해서 학생에 연결한다
     - 가입 즉시 로그인된 상태의 토큰을 돌려준다. role 은 항상 PARENT (관리자 계정은 가입으로 만들 수 없다)"""
-    u = create_user_row(db, body.email, body.password, body.name, UserRole.PARENT, body.children)
+    u = create_user_row(
+        db, body.email, body.password, body.name, UserRole.PARENT, body.children,
+        signup_method="APP",
+    )
     reqs = db.query(ChildRequest).filter(ChildRequest.user_id == u.id).order_by(ChildRequest.id).all()
     return {**auth_response(u), "child_requests": [parent_request_dict(r) for r in reqs]}
 
@@ -177,7 +210,65 @@ def put_push_token(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    me.push_token = body.push_token
+    token = body.push_token
+    user_id = me.id
+    row = db.query(PushToken).filter(PushToken.token == token).first()
+    if row:
+        row.user_id = user_id
+        row.updated_at = datetime.now()
+    else:
+        db.add(PushToken(user_id=user_id, token=token))
+
+    db.query(User).filter(User.push_token == token, User.id != user_id).update(
+        {"push_token": None}, synchronize_session=False
+    )
+    me.push_token = token
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        row = db.query(PushToken).filter(PushToken.token == token).first()
+        if row is None:
+            raise
+        row.user_id = user_id
+        db.query(User).filter(User.push_token == token, User.id != user_id).update(
+            {"push_token": None}, synchronize_session=False
+        )
+        db.query(User).filter(User.id == user_id).update(
+            {"push_token": token}, synchronize_session=False
+        )
+        db.commit()
+
+
+@router.delete("/me/push-token", status_code=204)
+def delete_push_token(
+    body: PushTokenRequest,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    token = body.push_token
+    db.query(PushToken).filter(
+        PushToken.user_id == me.id,
+        PushToken.token == token,
+    ).delete(synchronize_session=False)
+    if me.push_token == token:
+        me.push_token = None
+    db.commit()
+
+
+@router.put("/me/password", status_code=204)
+def change_my_password(
+    body: PasswordChangeRequest,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if me.signup_method == "GOOGLE":
+        raise HTTPException(403, "소셜 로그인 계정은 비밀번호를 변경할 수 없습니다")
+    if not verify_password(body.current_password, me.password_hash):
+        raise HTTPException(401, "현재 비밀번호가 올바르지 않습니다")
+    if body.current_password == body.new_password:
+        raise HTTPException(400, "새 비밀번호는 현재 비밀번호와 달라야 합니다")
+    me.password_hash = hash_password(body.new_password)
     db.commit()
 
 
@@ -185,7 +276,12 @@ def put_push_token(
 @router.post("/web/users", status_code=201, dependencies=[Depends(require_admin)])
 def create_user(body: UserCreate, db: Session = Depends(get_db)):
     """email, password, name, role -> user"""
-    return user_to_dict(create_user_row(db, body.email, body.password, body.name, body.role))
+    return user_to_dict(
+        create_user_row(
+            db, body.email, body.password, body.name, body.role,
+            signup_method="ADMIN",
+        )
+    )
 
 
 @router.get("/web/users", dependencies=[Depends(require_admin)])

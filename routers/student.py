@@ -56,6 +56,23 @@ def my_children(me: User = Depends(require_parent), db: Session = Depends(get_db
     return [student_to_dict(s) for s in rows]
 
 
+@router.delete("/me/children/{student_id}", status_code=204)
+def unlink_my_child(
+    student_id: int,
+    me: User = Depends(require_parent),
+    db: Session = Depends(get_db),
+):
+    guardian = (
+        db.query(Guardian)
+        .filter(Guardian.user_id == me.id, Guardian.student_id == student_id)
+        .first()
+    )
+    if guardian is None:
+        raise HTTPException(404, "연결된 자녀를 찾을 수 없습니다")
+    db.delete(guardian)
+    db.commit()
+
+
 @router.put("/me/children/{student_id}/attendance")
 def set_attendance(
     student_id: int,
@@ -83,3 +100,30 @@ def set_attendance(
         db.add(Attendance(student_id=student_id, date=body.date, is_absent=body.is_absent))
     db.commit()
     return {"student_id": student_id, "date": body.date, "is_absent": body.is_absent}
+
+
+@router.get("/me/children/{student_id}/attendance")
+def get_attendance(
+    student_id: int,
+    date: date,
+    me: User = Depends(require_parent),
+    db: Session = Depends(get_db),
+):
+    is_mine = (
+        db.query(Guardian)
+        .filter(Guardian.user_id == me.id, Guardian.student_id == student_id)
+        .first()
+    )
+    if not is_mine:
+        raise HTTPException(403, "내 자녀가 아닙니다")
+
+    attendance = (
+        db.query(Attendance)
+        .filter(Attendance.student_id == student_id, Attendance.date == date)
+        .first()
+    )
+    return {
+        "student_id": student_id,
+        "date": date,
+        "is_absent": attendance.is_absent if attendance else False,
+    }
