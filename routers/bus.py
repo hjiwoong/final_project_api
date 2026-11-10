@@ -4,8 +4,13 @@ from sqlalchemy.orm import Session
 
 from database.db_connection import get_db
 from models.models import Bus, BusStudent
+from core.security import require_admin
 
-router = APIRouter(prefix="/web/buses", tags=["관리-버스"])
+router = APIRouter(
+    prefix="/web/buses",
+    tags=["관리-버스"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 class BusCreate(BaseModel):
@@ -40,3 +45,47 @@ def list_buses(db: Session = Depends(get_db)):
         cnt = db.query(BusStudent).filter(BusStudent.bus_id == b.id).count()
         result.append(bus_to_dict(b, cnt))
     return result
+
+@router.put("/{bus_id}")
+def update_bus(
+    bus_id: int,
+    body: BusCreate,
+    db: Session = Depends(get_db),
+):
+    bus = db.get(Bus, bus_id)
+
+    if not bus:
+        raise HTTPException(
+            status_code=404,
+            detail="버스를 찾을 수 없습니다"
+        )
+
+    duplicate = (
+        db.query(Bus)
+        .filter(
+            Bus.plate_no == body.plate_no,
+            Bus.id != bus_id
+        )
+        .first()
+    )
+
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail="이미 등록된 차량번호입니다"
+        )
+
+    bus.name = body.name
+    bus.plate_no = body.plate_no
+    bus.driver_id = body.driver_id
+
+    db.commit()
+    db.refresh(bus)
+
+    student_count = (
+        db.query(BusStudent)
+        .filter(BusStudent.bus_id == bus.id)
+        .count()
+    )
+
+    return bus_to_dict(bus, student_count)

@@ -91,8 +91,8 @@ road_hazard 프로젝트의 `services/llm_service.py`, `agent_service.py`, `rag_
 | 기능 | 파일 | 동작 |
 |---|---|---|
 | AI ② LLM 요약 | `services/llm_service.py` | 경고 생성 시 템플릿 요약을 저장하고, 응답 후 백그라운드에서 Gemini 문장(감지 위치·확인할 곳)을 덧붙여 `alert.llm_summary` 갱신 + SSE 전송. 첫 줄(인원 수)은 서버가 고정해 LLM이 숫자를 바꿀 수 없음 |
-| AI ④ Agent 경고 판단 | `services/agent_service.py` | `judge()` 결과에 사진 밝기를 더해 최종 등급·재촬영 요청·기사 안내문 결정. 등급은 올리기만 함(어두운 종점 사진은 '정상' 대신 '확인 필요') |
 | AI ③ RAG 대응 수칙 | `services/rag_service.py`, `routers/rag.py`, `knowledge/` (.md·.txt·.pdf) | 법령 PDF·기관 안전 매뉴얼 PDF·대응 수칙·앱 안내 문서를 Gemini 임베딩으로 검색해 근거(파일·쪽 번호)와 함께 답변 |
+| AI ④ Agent 경고 판단 | `services/agent_service.py` | `judge()` 결과에 사진 밝기를 더해 최종 등급·재촬영 요청·기사 안내문 결정. 등급은 올리기만 함(어두운 종점 사진은 '정상' 대신 '확인 필요') |
 | 챗봇 | `services/chat_service.py`, `routers/chat.py` | road_hazard 고객센터 챗봇 구조. 같은 지식 문서로 여러 턴 대화, 사용자 상황(진행 중 경고·오늘 결석) 반영, '아이가 안 내렸다' 같은 급한 표현에는 119·즉시 확인 안내를 고정으로 먼저 붙임 |
 | 공용 클라이언트 | `services/gemini_client.py` | `google-genai` SDK 호출, JSON 응답 파싱, 임베딩 |
 
@@ -119,6 +119,7 @@ DARK_BRIGHTNESS_THRESHOLD=60
 ```
 
 ### 지식 문서 (`knowledge/`)
+
 | 형식 | 자르는 단위 | 출처 표시 |
 |---|---|---|
 | `.md` / `.txt` | `## 소제목` (첫 줄 `# 제목`, `출처:` 줄) | 파일 이름 · 출처 줄 |
