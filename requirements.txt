@@ -10,3 +10,4 @@ pydantic[email]
 pyjwt
 google-auth
 requests
+firebase-admin>=6.5

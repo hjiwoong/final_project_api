@@ -56,6 +56,7 @@ def google_login(body: GoogleLoginRequest, db: Session = Depends(get_db)):
                     password_hash=hash_password(secrets.token_urlsafe(32)),
                     name=body.name or g["name"] or g["email"].split("@")[0],
                     role=UserRole.PARENT,
+                    signup_method="GOOGLE",
                 )
                 db.add(user)
                 db.flush()
@@ -66,6 +67,9 @@ def google_login(body: GoogleLoginRequest, db: Session = Depends(get_db)):
             db.rollback()
             raise HTTPException(409, "처리 중 충돌이 발생했습니다. 다시 시도하세요")
         db.refresh(user)
+
+    if user.deletion_requested_at is not None:
+        raise HTTPException(403, "계정 삭제 유예 중입니다. 계정 복구 API를 이용하세요")
 
     reqs = db.query(ChildRequest).filter(ChildRequest.user_id == user.id).order_by(ChildRequest.id).all()
     return {

@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -11,16 +13,38 @@ from core.security import require_admin
 from database.db_connection import get_db
 from database.orm import init_db
 from services.detector import MODE as DETECTOR_MODE
+from services.account_deletions import delete_expired_accounts
 from routers import (
-    alert, boarding_event, bus, bus_student, child_request, guardian,
-    notification, social, stats, student, student_admin, trip, user,
+    alert, boarding_event, bus, bus_student, child_request, guardian, location,
+    notification, parent_bus, social, stats, student, student_admin, trip, user,
 )
+
+logger = logging.getLogger(__name__)
+
+
+async def account_deletion_worker():
+    while True:
+        try:
+            deleted = await asyncio.to_thread(delete_expired_accounts)
+            if deleted:
+                logger.info("Permanently deleted %s expired parent accounts", deleted)
+        except Exception:
+            logger.exception("Failed to process expired account deletions")
+        await asyncio.sleep(60 * 60)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()   # 서버 시작 시 MySQL 에 테이블 생성
-    yield
+    worker = asyncio.create_task(account_deletion_worker())
+    try:
+        yield
+    finally:
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="AI 통학버스 미하차 교차검증·안전관리", lifespan=lifespan)
@@ -43,9 +67,11 @@ app.include_router(boarding_event.router)
 app.include_router(alert.router)
 app.include_router(notification.router)
 app.include_router(child_request.router)
+app.include_router(location.router)
 app.include_router(social.router)
 app.include_router(student_admin.router)
 app.include_router(stats.router)
+app.include_router(parent_bus.router)
 
 
 @app.get("/health", tags=["시스템"])
@@ -91,4 +117,5 @@ if __name__ == "__main__":  # 직접 실행 시 uvicorn 서버 시작, python ma
     import uvicorn
 
     check_db_or_exit()
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    # 같은 Wi-Fi의 휴대폰에서도 접속할 수 있도록 모든 네트워크 인터페이스에서 수신
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

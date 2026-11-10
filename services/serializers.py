@@ -73,5 +73,10 @@ def alert_to_parent_dict(a: Alert) -> dict:
         "status": a.status.value,
         "message": a.message,
         "llm_summary": a.llm_summary,
+        "detected_count": a.event.person_count if a.event else None,
+        "detected_at": (
+            a.event.captured_at or a.event.uploaded_at
+            if a.event else a.created_at
+        ),
         "created_at": a.created_at,
     }
