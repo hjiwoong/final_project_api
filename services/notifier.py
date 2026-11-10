@@ -3,6 +3,8 @@
 수신자
 - 관리자(ADMIN) 전체
 - 학부모: URGENT(미하차 의심)일 때만, 해당 버스 탑승 예정(오늘 결석 제외) 학생의 보호자
+- URGENT 경고는 응답 후 send_alert_pushes 가 FCM 푸시도 발송 (실패해도 알림 기록은 유지)
+LLM 요약은 services/llm_service.py, Agent 판단은 services/agent_service.py
 """
 import logging
 import os
@@ -20,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 def build_summary(boarding: int, remaining: int, level: AlertLevel) -> str:
-    # TODO: 멀티모달 LLM 요약으로 교체
+    # 경고를 만들 때 즉시 쓰는 템플릿 요약.
+    # 응답 후 llm_service.enrich_alert_summary 가 LLM 문장을 덧붙여 갱신한다. (첫 줄은 이 문장과 같음)
     if level == AlertLevel.URGENT:
         return f"하차 후 {remaining}명 잔류 의심 · 승차 {boarding} / 잔류 {remaining}"
     return "사진의 검출 신뢰도가 낮아 재촬영 또는 관리자 확인이 필요합니다"
@@ -43,8 +46,12 @@ def raise_alert(
     existing = open_alerts(db, trip.id)
     if existing:
         a = existing[0]
+        escalated = a.level != AlertLevel.URGENT and level == AlertLevel.URGENT
         a.event_id, a.level, a.message, a.llm_summary = event.id, level, message, summary
         db.flush()
+        if escalated:
+            # 긴급으로 올라가면 아직 알림을 못 받은 보호자에게 알림 추가 (관리자 중복 없음)
+            _notify(db, a, trip, level)
         return a
 
     a = Alert(trip_id=trip.id, event_id=event.id, level=level,
@@ -84,7 +91,10 @@ def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
         )
         user_ids |= {p[0] for p in parents}
 
-    for uid in user_ids:
+    already = {
+        r[0] for r in db.query(Notification.user_id).filter(Notification.alert_id == alert.id)
+    }
+    for uid in user_ids - already:
         db.add(Notification(alert_id=alert.id, user_id=uid, title=title, body=body))
 
 
@@ -95,8 +105,12 @@ def _firebase_messaging():
         or r"D:\secrets\final-project-b66de-firebase-adminsdk-fbsvc-c2cb0dc867.json"
     )
 
-    from firebase_admin import credentials, get_app, initialize_app, messaging
-    from firebase_admin.exceptions import FirebaseError
+    try:
+        from firebase_admin import credentials, get_app, initialize_app, messaging
+        from firebase_admin.exceptions import FirebaseError
+    except ImportError:
+        logger.warning("firebase-admin 이 설치되지 않아 FCM 푸시를 건너뜁니다 (pip install firebase-admin)")
+        return None
 
     try:
         try:
@@ -150,7 +164,9 @@ def send_alert_pushes(alert_id: int) -> None:
                 user_id,
                 alert_id,
             )
-            if getattr(error, "code", None) in {
+            # Python Admin SDK: 앱 삭제·토큰 만료는 UnregisteredError(code=NOT_FOUND)
+            if isinstance(error, messaging.UnregisteredError) or getattr(error, "code", None) in {
+                "NOT_FOUND",
                 "messaging/registration-token-not-registered",
                 "messaging/invalid-registration-token",
             }:

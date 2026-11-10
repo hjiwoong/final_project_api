@@ -11,3 +11,7 @@ pyjwt
 google-auth
 requests
 firebase-admin>=6.5
+google-genai>=1.0      # Gemini (LLM 요약·Agent 안내문·RAG 임베딩)
+pillow                 # 사진 밝기 점검
+pypdf>=4              # RAG: 법령·매뉴얼 PDF 읽기
+

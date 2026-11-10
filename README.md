@@ -83,3 +83,51 @@ Android 13 이상에서는 앱의 알림 권한을 허용해야 합니다. iOS�
 ```
 
 구글 계정은 `password` 대신 검증된 `google_id_token`을 보내면 됩니다. 삭제 예약은 서버의 정기 작업에서 처리되므로 배포 환경에서 최소 한 개의 API 인스턴스를 계속 실행해야 합니다.
+
+## AI 연계: LLM 요약 · Agent 경고 판단 · RAG 대응 수칙 · 챗봇 (Gemini 무료 API)
+
+road_hazard 프로젝트의 `services/llm_service.py`, `agent_service.py`, `rag_service.py` 구조(`USE_REAL_AI` 스위치, mock/real 함수, `_normalize`, 실패 시 폴백)를 그대로 옮기고 OpenAI 호출을 Gemini로 바꿨습니다. `GEMINI_API_KEY`가 없으면 세 기능 모두 mock(템플릿·글자 매칭)으로 동작하므로 키 없이도 서버가 정상 동작합니다.
+
+| 기능 | 파일 | 동작 |
+|---|---|---|
+| AI ② LLM 요약 | `services/llm_service.py` | 경고 생성 시 템플릿 요약을 저장하고, 응답 후 백그라운드에서 Gemini 문장(감지 위치·확인할 곳)을 덧붙여 `alert.llm_summary` 갱신 + SSE 전송. 첫 줄(인원 수)은 서버가 고정해 LLM이 숫자를 바꿀 수 없음 |
+| AI ③ RAG 대응 수칙 | `services/rag_service.py`, `routers/rag.py`, `knowledge/` (.md·.txt·.pdf) | 법령 PDF·기관 안전 매뉴얼 PDF·대응 수칙·앱 안내 문서를 Gemini 임베딩으로 검색해 근거(파일·쪽 번호)와 함께 답변 |
+| AI ④ Agent 경고 판단 | `services/agent_service.py` | `judge()` 결과에 사진 밝기를 더해 최종 등급·재촬영 요청·기사 안내문 결정. 등급은 올리기만 함(어두운 종점 사진은 '정상' 대신 '확인 필요') |
+| 챗봇 | `services/chat_service.py`, `routers/chat.py` | road_hazard 고객센터 챗봇 구조. 같은 지식 문서로 여러 턴 대화, 사용자 상황(진행 중 경고·오늘 결석) 반영, '아이가 안 내렸다' 같은 급한 표현에는 119·즉시 확인 안내를 고정으로 먼저 붙임 |
+| 공용 클라이언트 | `services/gemini_client.py` | `google-genai` SDK 호출, JSON 응답 파싱, 임베딩 |
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/chat/hello` | 채팅 화면 첫 인사 `{reply, suggestions}` (역할별) |
+| `POST` | `/chat` | `{"message": "...", "history": [{"role": "user"|"bot", "text": "..."}], "alert_id": 12}` → `{reply, suggestions, sources, mode}`. history 는 앱이 보관해 매번 보냄(서버 저장 안 함). `/rag/ask` 와 분당 한도 공유 |
+| `POST` | `/rag/ask` | `{"question": "...", "alert_id": 12}` → `{"answer", "sources", "mode"}`. 관리자·학부모 사용(학부모는 내 아이 버스 긴급 경고만). `question` 없이 `alert_id`만 보내면 경고 등급에 맞는 대응 수칙을 답함. 사용자당 분당 10회 |
+
+`POST /trips/{id}/dropoff-photo` 응답에 `guidance`(기사 행동 안내), `retake_recommended`, `agent_reasons`가, `POST /trips/{id}/boarding-photo` 응답에 `photo_dark`, `guidance`가 추가되었습니다. `GET /health`의 `ai` 항목에서 AI 설정 상태를 확인할 수 있습니다.
+
+`.env` 설정:
+
+```
+GEMINI_API_KEY=발급받은_키           # Google AI Studio. 저장소에 올리지 말 것
+GEMINI_MODEL=gemini-3.5-flash-lite   # 무료 등급 모델
+GEMINI_EMBED_MODEL=gemini-embedding-2
+LLM_ENABLED=true
+LLM_SEND_IMAGE=false                 # true면 종점 사진도 Gemini에 보냄 (무료 등급은 학습에 쓰일 수 있어 실제 아동 사진에는 false)
+RAG_ENABLED=true
+AGENT_LLM_GUIDANCE=false             # true면 기사 안내문을 Gemini가 대응 수칙 근거로 작성
+AGENT_ESCALATE_DARK=true
+DARK_BRIGHTNESS_THRESHOLD=60
+```
+
+### 지식 문서 (`knowledge/`)
+
+| 형식 | 자르는 단위 | 출처 표시 |
+|---|---|---|
+| `.md` / `.txt` | `## 소제목` (첫 줄 `# 제목`, `출처:` 줄) | 파일 이름 · 출처 줄 |
+| 법령 `.pdf` | `제○조(…)` 조문 단위 (자동 인식) | `도로교통법.pdf p.12` |
+| 매뉴얼 `.pdf` | `❑`·`❍` 제목 단위 (예: `운전자 매뉴얼 · 하차 시`), 제목 기호가 없으면 쪽 단위. 그림만 있는 쪽은 건너뜀 | `기관_안전매뉴얼.pdf p.3` |
+
+- 하위 폴더도 읽습니다. `_`로 시작하는 파일과 `README`는 읽지 않습니다.
+- 법령 PDF: 국가법령정보센터(law.go.kr)에서 법령을 열고 **저장 → PDF**. 전체 법령은 조각이 많아 처음 임베딩이 오래 걸리므로, 필요하면 해당 조문만 선택해 저장하세요.
+- `.hwp` 매뉴얼은 한글에서 **PDF로 저장**해서 넣습니다. 스캔 이미지 PDF는 글자를 읽지 못하므로 OCR 후 넣어야 합니다.
+- 문서를 추가·수정하면 다음 검색 때 **바뀐 조각만** 새로 임베딩해 `rag_index.json`에 더합니다 (무료 한도 초과(429) 시 자동 재시도).
+- `02_미하차_대응수칙.md`는 공식 매뉴얼 근거와 서비스 운영 규칙을 항목마다 `[근거: …]`로 구분합니다. 기관 자체 매뉴얼이 있으면 그 PDF를 넣고, 충돌하는 항목은 기관 매뉴얼에 맞춰 고치세요.

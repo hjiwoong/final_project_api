@@ -15,7 +15,7 @@ from models.models import (
     Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod, EventType,
     Guardian, Student, Trip, TripResult, TripStatus, User, UserRole,
 )
-from services import event_bus, notifier, storage
+from services import agent_service, event_bus, llm_service, notifier, storage
 from services.detector import DETECTOR_TIMEOUT_SEC, detect_people, low_conf_count
 from services.judge import judge
 from services.location_crypto import decrypt_coordinate_value, decrypt_location_value
@@ -303,6 +303,7 @@ async def boarding_photo(
     dets, mode = await run_detector(data, mock_count, mock_low_conf, t.expected_count or 0)
     person_count = len(dets)
     boarding_count = max(person_count - exclude_count, 0)
+    photo = await run_in_threadpool(agent_service.photo_check, data)   # AI ④ 사진 밝기 점검
 
     ev = BoardingEvent(
         trip_id=t.id, event_type=EventType.BOARDING,
@@ -320,6 +321,7 @@ async def boarding_photo(
         "event_id": ev.id, "person_count": person_count,
         "boarding_count": boarding_count, "low_conf_count": ev.low_conf_count,
         "detector_mode": mode,
+        "photo_dark": photo["photo_dark"], "guidance": photo["guidance"],
     }
 
 
@@ -347,7 +349,10 @@ async def dropoff_photo(
     person_count = len(dets)
     remaining = max(person_count - exclude_count, 0)
     low = low_conf_count(dets)
-    verdict = judge(t.boarding_count, remaining, low)
+    # 판정(judge) → Agent 가 사진 상태까지 보고 최종 결정 (등급은 올리기만, 내리지 않음)
+    verdict = await run_in_threadpool(
+        agent_service.decide, judge(t.boarding_count, remaining, low), data,
+    )
     path = storage.save_image(t.id, "dropoff", image.filename, data)
 
     # 종점(하차) 이벤트
@@ -385,8 +390,12 @@ async def dropoff_photo(
         )
 
     db.commit()
-    if alert and alert.level == AlertLevel.URGENT:
-        background_tasks.add_task(notifier.send_alert_pushes, alert.id)
+    if alert:
+        # 백그라운드 작업은 등록 순서대로 실행되므로, 긴급 푸시를 LLM 요약보다 먼저 보낸다
+        if alert.level == AlertLevel.URGENT:
+            background_tasks.add_task(notifier.send_alert_pushes, alert.id)
+        # AI ② 템플릿 요약을 응답 후 LLM 요약으로 보강 (응답을 늦추지 않음)
+        background_tasks.add_task(llm_service.enrich_alert_summary, alert.id, verdict.get("brightness"))
 
     # 실시간(SSE) 전송
     event_bus.publish("event", event_to_dict(ev))
@@ -405,6 +414,9 @@ async def dropoff_photo(
         "low_conf_count": low,
         "alert_id": alert_id,
         "detector_mode": mode,
+        "guidance": verdict["guidance"],                       # AI ④ 기사 행동 안내
+        "retake_recommended": verdict["retake_recommended"],
+        "agent_reasons": verdict["reasons"],
     }
 
 
