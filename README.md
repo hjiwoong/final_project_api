@@ -17,6 +17,10 @@
 |---|---|---|
 | `GET` | `/me/child-requests` | 내가 제출한 자녀 연결 요청과 처리 상태(`PENDING`, `APPROVED`, `REJECTED`), 거절 사유 조회 |
 | `GET` | `/me/children` | 현재 내 계정에 연결된 자녀 목록 조회 |
+
+| `GET` | `/me/children/{student_id}/attendance?date=YYYY-MM-DD` | 내 자녀의 해당 날짜 결석 여부 조회 (기록이 없으면 `is_absent: false`) |
+| `PUT` | `/me/children/{student_id}/attendance` | 내 자녀의 해당 날짜 결석 여부 저장 |
+
 | `GET` | `/me/buses` | 내 자녀에게 배정된 실제 버스 목록 조회 |
 | `DELETE` | `/me/children/{student_id}` | 해당 자녀와 내 계정의 연결 해제 (성공 시 `204`, 내 자녀가 아니면 `404`) |
 
@@ -29,6 +33,9 @@
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/me/location` | 로그인한 학부모 본인의 주소와 좌표 |
+
+| `GET` | `/me/location/search?address=...` | 네이버 Geocoding으로 주소 좌표 검색 (네이버 키 미설정 시 `503`) |
+
 | `PUT` | `/me/location` | 본인 주소 저장/수정 및 좌표 지오코딩 또는 직접 보정 |
 | `DELETE` | `/me/location` | 본인 주소와 좌표 삭제 |
 | `GET` | `/web/users/{user_id}/location` | 관리자 전용 학부모 위치 조회 |
@@ -49,9 +56,17 @@
 
 기사 앱의 탑승 지도는 로그인한 기사가 본인 운행에 대해 `GET /trips/{trip_id}/boarding-map`을 호출합니다. 응답은 해당 버스 배정 학생과 연결된 보호자 위치를 포함하며, 서버에서 복호화한 주소·좌표를 반환합니다. 좌표가 없는 보호자는 지도 위치 목록에서 제외됩니다. 다른 기사의 운행 ID를 지정하면 `404`를 반환합니다. 앱은 각 학생의 `guardian_locations`에서 위도·경도가 모두 있는 항목을 지도 마커로 표시해야 합니다.
 
+
+운행 시작 직후 취소할 때는 `DELETE /trips/{trip_id}`를 호출합니다. 로그인한 기사의 운행이어야 하며, 사진 처리나 이벤트 기록이 시작된 운행은 취소할 수 없습니다.
+
+
 ## 미하차 긴급 푸시 알림
 
 미하차 긴급 경고는 운행 기사와 해당 버스에 배정된 학생의 보호자에게 알림 내역을 저장하고 FCM 푸시도 발송합니다. 앱은 로그인 후 FCM 토큰을 등록하며 로그아웃하면 서버에서 토큰을 해제합니다. 서버에는 `firebase-admin`을 설치하고, 앱의 Firebase 프로젝트(현재 Android 설정은 `android/app/google-services.json`에 지정된 프로젝트)와 같은 프로젝트의 서비스 계정 JSON 파일을 사용하세요. 기본 경로는 `D:\secrets\final-project-b66de-firebase-adminsdk-fbsvc-c2cb0dc867.json`이며, `FIREBASE_SERVICE_ACCOUNT_FILE` 또는 `GOOGLE_APPLICATION_CREDENTIALS` 환경변수를 설정하면 해당 경로로 덮어쓸 수 있습니다. 서비스 계정 파일은 저장소에 넣지 말고 비밀 파일/환경 설정으로 관리해야 합니다. FCM 발송이 실패해도 알림 내역 저장은 유지되며 서버 로그에 원인이 기록됩니다.
+
+
+토큰은 기기별 `push_tokens` 테이블에 저장하며, 기존 `users.push_token` 값도 전송 대상으로 유지합니다. 한 계정의 여러 기기에서 알림을 받을 수 있고 같은 기기의 토큰이 다른 계정에 등록되면 해당 계정으로 이동합니다. 로그아웃은 `DELETE /me/push-token`에 `{"push_token":"<현재 기기의 FCM 토큰>"}`을 보내 해당 기기만 해제합니다. 앱에서 토큰을 가져오지 못하면 다른 기기 알림을 보호하기 위해 서버 해제를 건너뜁니다. 서버의 `FCM_ANDROID_CHANNEL_ID`와 앱의 `safety_alerts` 알림 채널 ID가 같아야 합니다.
+
 
 | Method | Path | Description |
 |---|---|---|
@@ -91,8 +106,10 @@ road_hazard 프로젝트의 `services/llm_service.py`, `agent_service.py`, `rag_
 | 기능 | 파일 | 동작 |
 |---|---|---|
 | AI ② LLM 요약 | `services/llm_service.py` | 경고 생성 시 템플릿 요약을 저장하고, 응답 후 백그라운드에서 Gemini 문장(감지 위치·확인할 곳)을 덧붙여 `alert.llm_summary` 갱신 + SSE 전송. 첫 줄(인원 수)은 서버가 고정해 LLM이 숫자를 바꿀 수 없음 |
-| AI ③ RAG 대응 수칙 | `services/rag_service.py`, `routers/rag.py`, `knowledge/` (.md·.txt·.pdf) | 법령 PDF·기관 안전 매뉴얼 PDF·대응 수칙·앱 안내 문서를 Gemini 임베딩으로 검색해 근거(파일·쪽 번호)와 함께 답변 |
+
 | AI ④ Agent 경고 판단 | `services/agent_service.py` | `judge()` 결과에 사진 밝기를 더해 최종 등급·재촬영 요청·기사 안내문 결정. 등급은 올리기만 함(어두운 종점 사진은 '정상' 대신 '확인 필요') |
+| AI ③ RAG 대응 수칙 | `services/rag_service.py`, `routers/rag.py`, `knowledge/` (.md·.txt·.pdf) | 법령 PDF·기관 안전 매뉴얼 PDF·대응 수칙·앱 안내 문서를 Gemini 임베딩으로 검색해 근거(파일·쪽 번호)와 함께 답변 |
+
 | 챗봇 | `services/chat_service.py`, `routers/chat.py` | road_hazard 고객센터 챗봇 구조. 같은 지식 문서로 여러 턴 대화, 사용자 상황(진행 중 경고·오늘 결석) 반영, '아이가 안 내렸다' 같은 급한 표현에는 119·즉시 확인 안내를 고정으로 먼저 붙임 |
 | 공용 클라이언트 | `services/gemini_client.py` | `google-genai` SDK 호출, JSON 응답 파싱, 임베딩 |
 
@@ -130,4 +147,6 @@ DARK_BRIGHTNESS_THRESHOLD=60
 - 법령 PDF: 국가법령정보센터(law.go.kr)에서 법령을 열고 **저장 → PDF**. 전체 법령은 조각이 많아 처음 임베딩이 오래 걸리므로, 필요하면 해당 조문만 선택해 저장하세요.
 - `.hwp` 매뉴얼은 한글에서 **PDF로 저장**해서 넣습니다. 스캔 이미지 PDF는 글자를 읽지 못하므로 OCR 후 넣어야 합니다.
 - 문서를 추가·수정하면 다음 검색 때 **바뀐 조각만** 새로 임베딩해 `rag_index.json`에 더합니다 (무료 한도 초과(429) 시 자동 재시도).
+
 - `02_미하차_대응수칙.md`는 공식 매뉴얼 근거와 서비스 운영 규칙을 항목마다 `[근거: …]`로 구분합니다. 기관 자체 매뉴얼이 있으면 그 PDF를 넣고, 충돌하는 항목은 기관 매뉴얼에 맞춰 고치세요.
+

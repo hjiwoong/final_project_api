@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from core.security import create_access_token, get_current_user, require_admin
 from database.db_connection import get_db
-from models.models import ChildRequest, SocialAccount, User, UserRole
+from models.models import ChildRequest, PushToken, SocialAccount, User, UserRole
 from services.account_deletions import ACCOUNT_DELETION_GRACE_DAYS
 from services.child_requests import (
     MAX_CHILDREN_AT_SIGNUP, ChildInput, dedupe, make_requests, parent_request_dict,
@@ -222,7 +222,10 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
     - 비밀번호: 4자 이상 + 영문 대문자 + 특수문자 포함
     - children 에 자녀 이름·반·관계를 적어 보내면 '승인 대기' 요청이 만들어지고, 관리자가 확인해서 학생에 연결한다
     - 가입 즉시 로그인된 상태의 토큰을 돌려준다. role 은 항상 PARENT (관리자 계정은 가입으로 만들 수 없다)"""
-    u = create_user_row(db, body.email, body.password, body.name, UserRole.PARENT, body.children)
+    u = create_user_row(
+        db, body.email, body.password, body.name, UserRole.PARENT, body.children,
+        signup_method="APP",
+    )
     reqs = db.query(ChildRequest).filter(ChildRequest.user_id == u.id).order_by(ChildRequest.id).all()
     return {**auth_response(u), "child_requests": [parent_request_dict(r) for r in reqs]}
 
@@ -249,6 +252,8 @@ def change_password(
     db: Session = Depends(get_db),
 ):
     """현재 비밀번호를 검증한 뒤 로그인 계정의 비밀번호를 변경한다."""
+    if me.signup_method == "GOOGLE":
+        raise HTTPException(403, "소셜 로그인 계정은 비밀번호를 변경할 수 없습니다")
     if not verify_password(body.current_password, me.password_hash):
         raise HTTPException(401, "현재 비밀번호가 올바르지 않습니다")
     if body.current_password == body.new_password:
@@ -368,16 +373,53 @@ def put_push_token(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    me.push_token = body.push_token
-    db.commit()
+    token = body.push_token
+    user_id = me.id
+    row = db.query(PushToken).filter(PushToken.token == token).first()
+    if row:
+        row.user_id = user_id
+        row.updated_at = datetime.now()
+    else:
+        db.add(PushToken(user_id=user_id, token=token))
+
+    db.query(User).filter(User.push_token == token, User.id != user_id).update(
+        {"push_token": None}, synchronize_session=False
+    )
+    me.push_token = token
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        row = db.query(PushToken).filter(PushToken.token == token).first()
+        if row is None:
+            raise
+        row.user_id = user_id
+        db.query(User).filter(User.push_token == token, User.id != user_id).update(
+            {"push_token": None}, synchronize_session=False
+        )
+        db.query(User).filter(User.id == user_id).update(
+            {"push_token": token}, synchronize_session=False
+        )
+        db.commit()
 
 
 @router.delete("/me/push-token", status_code=204)
 def delete_push_token(
+    body: PushTokenRequest | None = None,
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    me.push_token = None
+    """로그아웃 시 푸시 토큰 해제.
+    - push_token 을 보내면 이 기기의 토큰만 해제 (다른 기기 알림은 유지)
+    - 본문 없이 보내면 이 계정의 모든 기기 토큰을 해제 (예전 앱 버전 호환)"""
+    q = db.query(PushToken).filter(PushToken.user_id == me.id)
+    if body is not None:
+        q = q.filter(PushToken.token == body.push_token)
+        if me.push_token == body.push_token:
+            me.push_token = None
+    else:
+        me.push_token = None
+    q.delete(synchronize_session=False)
     db.commit()
 
 

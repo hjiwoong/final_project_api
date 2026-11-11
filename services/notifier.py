@@ -1,9 +1,10 @@
-"""경고(alert) 생성 + 수신자별 알림(notification) 기록
+"""경고(alert) 생성 + 수신자별 알림(notification) 및 푸시 전송
 
 수신자
 - 관리자(ADMIN) 전체
 - 학부모: URGENT(미하차 의심)일 때만, 해당 버스 탑승 예정(오늘 결석 제외) 학생의 보호자
-- URGENT 경고는 응답 후 send_alert_pushes 가 FCM 푸시도 발송 (실패해도 알림 기록은 유지)
+- URGENT 경고는 응답 후 send_alert_pushes 가 수신자의 모든 기기(push_tokens)로 FCM 푸시 발송
+  (실패해도 알림 기록은 유지, 만료된 토큰은 자동 삭제)
 LLM 요약은 services/llm_service.py, Agent 판단은 services/agent_service.py
 """
 import logging
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 from database.db_connection import SessionLocal
 from models.models import (
     Alert, AlertLevel, AlertStatus, Attendance, BoardingEvent, BusStudent,
-    Guardian, Notification, Trip, User, UserRole,
+    Guardian, Notification, PushToken, Trip, User, UserRole,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,40 +92,105 @@ def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
         )
         user_ids |= {p[0] for p in parents}
 
-    already = {
-        r[0] for r in db.query(Notification.user_id).filter(Notification.alert_id == alert.id)
+    already_notified = {
+        row[0]
+        for row in db.query(Notification.user_id).filter(
+            Notification.alert_id == alert.id
+        )
     }
-    for uid in user_ids - already:
+    for uid in user_ids - already_notified:
         db.add(Notification(alert_id=alert.id, user_id=uid, title=title, body=body))
 
 
-def _firebase_messaging():
-    credentials_path = (
+ANDROID_CHANNEL_ID = os.getenv("FCM_ANDROID_CHANNEL_ID", "safety_alerts")
+
+
+def _credentials_path() -> str:
+    return (
         os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE")
         or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         or r"D:\secrets\final-project-b66de-firebase-adminsdk-fbsvc-c2cb0dc867.json"
     )
 
+
+def push_status() -> dict:
+    """이 서버의 FCM 설정 상태를 헬스 응답에 제공한다."""
+    path = _credentials_path()
+    try:
+        import firebase_admin  # noqa: F401
+        installed = True
+    except ImportError:
+        installed = False
+    return {
+        "fcm_installed": installed,
+        "fcm_credentials_found": os.path.isfile(path),
+        "fcm_credentials_from_env": bool(
+            os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE")
+            or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        ),
+        "android_channel": ANDROID_CHANNEL_ID,
+    }
+
+
+def _firebase_messaging():
+    credentials_path = _credentials_path()
     try:
         from firebase_admin import credentials, get_app, initialize_app, messaging
         from firebase_admin.exceptions import FirebaseError
     except ImportError:
-        logger.warning("firebase-admin 이 설치되지 않아 FCM 푸시를 건너뜁니다 (pip install firebase-admin)")
+        logger.warning("firebase-admin 이 설치되지 않아 FCM 푸시를 건너뜁니다")
         return None
 
     try:
         try:
             app = get_app()
         except ValueError:
+            if not os.path.isfile(credentials_path):
+                logger.error("FCM 서비스 계정 키 파일이 없습니다: %s", credentials_path)
+                return None
             app = initialize_app(credentials.Certificate(credentials_path))
         return messaging, app
     except (FirebaseError, OSError, ValueError):
-        logger.exception("Could not initialize Firebase Admin for FCM")
+        logger.exception("Firebase Admin 초기화 실패")
         return None
 
 
+def _push_targets(db: Session, alert_id: int) -> list[tuple[int, str, str, str]]:
+    rows = (
+        db.query(Notification.user_id, Notification.title, Notification.body)
+        .filter(Notification.alert_id == alert_id)
+        .all()
+    )
+    if not rows:
+        return []
+    user_ids = {row[0] for row in rows}
+    tokens: dict[int, set[str]] = {}
+    for user_id, token in db.query(PushToken.user_id, PushToken.token).filter(
+        PushToken.user_id.in_(user_ids)
+    ):
+        tokens.setdefault(user_id, set()).add(token)
+    for user_id, token in db.query(User.id, User.push_token).filter(
+        User.id.in_(user_ids), User.push_token.isnot(None)
+    ):
+        tokens.setdefault(user_id, set()).add(token)
+
+    parents = {
+        user_id
+        for (user_id,) in db.query(User.id).filter(
+            User.id.in_(user_ids), User.role == UserRole.PARENT
+        )
+    }
+    targets, seen = [], set()
+    for user_id, title, body in sorted(rows, key=lambda row: row[0] not in parents):
+        for token in sorted(tokens.get(user_id, ())):
+            if token not in seen:
+                seen.add(token)
+                targets.append((user_id, title, body or "", token))
+    return targets
+
+
 def send_alert_pushes(alert_id: int) -> None:
-    """Deliver committed alert notifications through FCM after the API response."""
+    """DB 에 커밋된 경고 알림을 기기별 FCM 토큰으로 전송한다."""
     firebase = _firebase_messaging()
     if firebase is None:
         return
@@ -133,50 +199,61 @@ def send_alert_pushes(alert_id: int) -> None:
 
     messaging, app = firebase
     with SessionLocal() as db:
-        targets = (
-            db.query(Notification.user_id, Notification.title, Notification.body, User.push_token)
-            .join(User, User.id == Notification.user_id)
-            .filter(Notification.alert_id == alert_id, User.push_token.isnot(None))
-            .all()
-        )
+        targets = _push_targets(db, alert_id)
+    if not targets:
+        logger.info("alert_id=%s: 등록된 FCM 수신 기기가 없습니다", alert_id)
+        return
 
-    invalid_tokens: list[tuple[int, str]] = []
+    invalid_tokens = []
+    sent = 0
     for user_id, title, body, token in targets:
         try:
             messaging.send(
                 messaging.Message(
                     token=token,
-                    notification=messaging.Notification(title=title, body=body or ""),
+                    notification=messaging.Notification(title=title, body=body),
                     data={"type": "safety_alert", "alert_id": str(alert_id)},
-                    android=messaging.AndroidConfig(priority="high"),
+                    android=messaging.AndroidConfig(
+                        priority="high",
+                        ttl=3600,
+                        notification=messaging.AndroidNotification(
+                            channel_id=ANDROID_CHANNEL_ID,
+                            sound="default",
+                            priority="max",
+                            visibility="public",
+                            tag=f"alert-{alert_id}",
+                        ),
+                    ),
                     apns=messaging.APNSConfig(
                         headers={"apns-priority": "10"},
                         payload=messaging.APNSPayload(
-                            aps=messaging.Aps(sound="default"),
+                            aps=messaging.Aps(sound="default")
                         ),
                     ),
                 ),
                 app=app,
             )
+            sent += 1
         except FirebaseError as error:
             logger.exception(
-                "FCM delivery failed for user_id=%s alert_id=%s",
-                user_id,
-                alert_id,
+                "FCM 전송 실패: user_id=%s alert_id=%s", user_id, alert_id
             )
-            # Python Admin SDK: 앱 삭제·토큰 만료는 UnregisteredError(code=NOT_FOUND)
-            if isinstance(error, messaging.UnregisteredError) or getattr(error, "code", None) in {
+            if isinstance(error, messaging.UnregisteredError) or getattr(
+                error, "code", None
+            ) in {
                 "NOT_FOUND",
                 "messaging/registration-token-not-registered",
                 "messaging/invalid-registration-token",
             }:
-                invalid_tokens.append((user_id, token))
+                invalid_tokens.append(token)
+    logger.info("alert_id=%s: FCM 푸시 %d/%d건 발송", alert_id, sent, len(targets))
 
     if invalid_tokens:
         with SessionLocal() as db:
-            for user_id, token in invalid_tokens:
-                db.query(User).filter(
-                    User.id == user_id,
-                    User.push_token == token,
-                ).update({"push_token": None}, synchronize_session=False)
+            db.query(PushToken).filter(
+                PushToken.token.in_(invalid_tokens)
+            ).delete(synchronize_session=False)
+            db.query(User).filter(User.push_token.in_(invalid_tokens)).update(
+                {"push_token": None}, synchronize_session=False
+            )
             db.commit()

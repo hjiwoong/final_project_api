@@ -15,6 +15,7 @@ def notification_to_dict(n: Notification) -> dict:
     return {
         "id": n.id,
         "alert_id": n.alert_id,
+        "alert_level": n.alert.level.value if n.alert else None,
         "title": n.title,
         "body": n.body,
         "sent_at": n.sent_at,

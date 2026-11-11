@@ -34,6 +34,19 @@ def init_db():
             if column not in existing:
                 connection.execute(text(f"ALTER TABLE users ADD COLUMN {column} {column_type}"))
                 existing.add(column)
+                if column == "signup_method":
+                    # 컬럼을 처음 만들 때만: 기존 관리자 계정은 ADMIN, 나머지는 기본값 UNKNOWN
+                    connection.execute(text(
+                        "UPDATE users SET signup_method = 'ADMIN' WHERE role = 'ADMIN'"
+                    ))
+
+        # admin-app-new 브랜치로 이미 실행된 DB 정리:
+        # 그 버전은 signup_method 를 NULL 허용으로 만들고 일반 계정에 'LEGACY' 를 넣었다.
+        # 'LEGACY' 는 허용 값(APP/GOOGLE/ADMIN/UNKNOWN)이 아니므로 UNKNOWN 으로 바꾼다.
+        connection.execute(text(
+            "UPDATE users SET signup_method = 'UNKNOWN' "
+            "WHERE signup_method IS NULL OR signup_method = 'LEGACY'"
+        ))
 
         if legacy_location_columns:
             selected = ", ".join(["id", *legacy_location_columns])

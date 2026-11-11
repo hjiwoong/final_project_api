@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from core.security import require_admin
 from database.db_connection import get_db
 from models.models import (
-    Alert, AlertLevel, AlertStatus, Notification,
+    Alert, AlertLevel, AlertStatus,
     Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod, EventType,
     Guardian, Student, Trip, TripResult, TripStatus, User, UserRole,
 )
@@ -193,15 +193,18 @@ def trip_boarding_map(
                 "longitude": decrypt_coordinate_value(longitude),
             })
 
+    bus_name = trip.bus.name if trip.bus else None
     return {
         "trip_id": trip.id,
         "bus_id": trip.bus_id,
+        "bus_name": bus_name,
         "students": [
             {
                 "id": student.id,
                 "name": student.name,
                 "class_name": student.class_name,
                 "is_absent": student.id in absent_student_ids,
+                "bus_name": bus_name,
                 "guardian_locations": guardian_locations.get(student.id, []),
             }
             for student in students
@@ -215,26 +218,19 @@ def cancel_trip(
     me: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """진행 중 운행 취소. 운행과 관련된 이벤트·경고·알림 기록도 함께 삭제한다."""
+    """사진 처리가 시작되기 전, 로그인한 기사의 빈 운행만 취소한다.
+
+    사진·경고가 기록된 운행은 안전 기록 보존을 위해 취소(삭제)하지 않고 종료 절차를 거친다."""
     t = get_trip_or_404(db, trip_id)
     if t.driver_id != me.id:
         raise HTTPException(404, "운행을 찾을 수 없습니다")
     if t.status != TripStatus.IN_PROGRESS:
         raise HTTPException(409, "진행 중인 운행만 취소할 수 있습니다")
+    if t.boarding_count is not None or t.remaining_count is not None:
+        raise HTTPException(409, "사진 처리가 시작된 운행은 취소할 수 없습니다")
+    if t.events or t.alerts:
+        raise HTTPException(409, "이벤트가 기록된 운행은 취소할 수 없습니다")
 
-    alert_ids = [
-        row[0] for row in db.query(Alert.id).filter(Alert.trip_id == t.id).all()
-    ]
-    if alert_ids:
-        db.query(Notification).filter(
-            Notification.alert_id.in_(alert_ids)
-        ).delete(synchronize_session=False)
-        db.query(Alert).filter(Alert.id.in_(alert_ids)).delete(
-            synchronize_session=False
-        )
-    db.query(BoardingEvent).filter(
-        BoardingEvent.trip_id == t.id
-    ).delete(synchronize_session=False)
     db.delete(t)
     db.commit()
     return Response(status_code=204)

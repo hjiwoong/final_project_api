@@ -183,6 +183,23 @@ def unlink_child(
     db.commit()
 
 
+@router.delete("/me/children/{student_id}", status_code=204)
+def unlink_my_child(
+    student_id: int,
+    me: User = Depends(require_parent),
+    db: Session = Depends(get_db),
+):
+    guardian = (
+        db.query(Guardian)
+        .filter(Guardian.user_id == me.id, Guardian.student_id == student_id)
+        .first()
+    )
+    if guardian is None:
+        raise HTTPException(404, "연결된 자녀를 찾을 수 없습니다")
+    db.delete(guardian)
+    db.commit()
+
+
 @router.put("/me/children/{student_id}/attendance")
 def set_attendance(
     student_id: int,
@@ -218,7 +235,7 @@ def get_attendance(
     me: User = Depends(require_parent),
     db: Session = Depends(get_db),
 ):
-    """내 자녀의 특정 날짜 출석/결석 상태 조회"""
+
 
     is_mine = (
         db.query(Guardian)
@@ -234,6 +251,7 @@ def get_attendance(
 
     attendance = (
         db.query(Attendance)
+
         .filter(
             Attendance.student_id == student_id,
             Attendance.date == date,

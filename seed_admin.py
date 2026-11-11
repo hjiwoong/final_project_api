@@ -16,7 +16,15 @@ if db.query(User).filter(User.email == EMAIL).first():
     print("이미 존재합니다:", EMAIL)
 else:
     hashed = bcrypt.hashpw(PASSWORD.encode(), bcrypt.gensalt()).decode()
-    db.add(User(email=EMAIL, password_hash=hashed, name=NAME, role=UserRole.ADMIN))
+    db.add(
+        User(
+            email=EMAIL,
+            password_hash=hashed,
+            name=NAME,
+            role=UserRole.ADMIN,
+            signup_method="ADMIN",
+        )
+    )
     db.commit()
     print("관리자 생성 완료:", EMAIL, "/", PASSWORD)
 db.close()

@@ -7,30 +7,34 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from core.security import require_admin
 from database.db_connection import get_db
 from database.orm import init_db
-from services.detector import MODE as DETECTOR_MODE
 from services.account_deletions import delete_expired_accounts
+from services.detector import MODE as DETECTOR_MODE
 from routers import (
-    alert, boarding_event, bus, bus_student, chat, child_request, guardian, location,
+    account, alert, boarding_event, bus, bus_student, chat, child_request, guardian, location,
     notification, parent_bus, rag, social, stats, student, student_admin, trip, user,
 )
-from services import agent_service, chat_service, gemini_client, llm_service, rag_service
+from services import agent_service, chat_service, gemini_client, llm_service, notifier, rag_service
 
 logger = logging.getLogger(__name__)
 
 
 async def account_deletion_worker():
+    """1시간마다 유예 기간(30일)이 지난 학부모 계정을 실제 삭제"""
     while True:
         try:
             deleted = await asyncio.to_thread(delete_expired_accounts)
             if deleted:
-                logger.info("Permanently deleted %s expired parent accounts", deleted)
-        except Exception:
-            logger.exception("Failed to process expired account deletions")
+                logger.info("유예 기간이 지난 계정 %s개를 삭제했습니다", deleted)
+        except SQLAlchemyError:
+            logger.exception("계정 삭제 만료 작업에 실패했습니다 (DB 오류)")
+        except Exception:  # noqa: BLE001  다른 오류로 작업이 영구 중단되지 않게
+            logger.exception("계정 삭제 만료 작업에 실패했습니다")
         await asyncio.sleep(60 * 60)
 
 
@@ -59,20 +63,21 @@ app.add_middleware(
 )
 
 app.include_router(user.router)
+app.include_router(account.router)
 app.include_router(bus.router, dependencies=[Depends(require_admin)])
 app.include_router(student.router)
 app.include_router(bus_student.router, dependencies=[Depends(require_admin)])
 app.include_router(guardian.router, dependencies=[Depends(require_admin)])
+app.include_router(location.router)
+app.include_router(parent_bus.router)   # 학부모: 내 자녀 배정 버스 / 운행 상태
 app.include_router(trip.router)
 app.include_router(boarding_event.router)
 app.include_router(alert.router)
 app.include_router(notification.router)
 app.include_router(child_request.router)
-app.include_router(location.router)
 app.include_router(social.router)
 app.include_router(student_admin.router)
 app.include_router(stats.router)
-app.include_router(parent_bus.router)   # 학부모: 내 자녀 배정 버스 / 운행 상태
 app.include_router(rag.router)          # AI ③ RAG 대응 수칙
 app.include_router(chat.router)         # 챗봇
 
@@ -83,6 +88,7 @@ def health(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
     return {
         "status": "ok", "db": "connected", "detector_mode": DETECTOR_MODE,
+        "push": notifier.push_status() if hasattr(notifier, "push_status") else None,
         "ai": {**gemini_client.status(), **llm_service.status(),
                **agent_service.status(), **rag_service.status(), **chat_service.status()},
     }
@@ -125,4 +131,6 @@ if __name__ == "__main__":  # 직접 실행 시 uvicorn 서버 시작, python ma
 
     check_db_or_exit()
     # 같은 Wi-Fi의 휴대폰에서도 접속할 수 있도록 모든 네트워크 인터페이스에서 수신
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    # 자동 재시작(reload)은 사진 저장 때마다 서버가 재시작될 수 있어 기본은 끔. 필요하면 .env 에 RELOAD=1
+    uvicorn.run("main:app", host="0.0.0.0", port=8000,
+                reload=os.getenv("RELOAD", "0").lower() in ("1", "true"))
