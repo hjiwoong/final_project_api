@@ -194,3 +194,55 @@ def list_users(role: UserRole | None = None, db: Session = Depends(get_db)):
     if role:
         q = q.filter(User.role == role)
     return [user_to_dict(u) for u in q.all()]
+
+@router.delete(
+    "/web/users/{user_id}",
+    dependencies=[Depends(require_admin)]
+)
+def delete_parent_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+):
+    from models.models import (
+        Guardian, SocialAccount, Notification,
+        Bus, Trip
+    )
+
+    user = db.get(User, user_id)
+
+    if not user:
+        raise HTTPException(404, "계정을 찾을 수 없습니다")
+
+    if user.role != UserRole.PARENT:
+        raise HTTPException(403, "관리자 계정은 삭제할 수 없습니다")
+
+    if db.query(Bus).filter(Bus.driver_id == user_id).first():
+        raise HTTPException(409, "버스 담당자로 등록된 계정입니다")
+
+    if db.query(Trip).filter(Trip.driver_id == user_id).first():
+        raise HTTPException(409, "운행 기록이 연결된 계정입니다")
+
+    if db.query(Guardian).filter(Guardian.user_id == user_id).first():
+        raise HTTPException(409, "학생과 연결된 보호자 계정입니다")
+
+    if db.query(ChildRequest).filter(ChildRequest.user_id == user_id).first():
+        raise HTTPException(409, "자녀 연결 요청 기록이 남아 있습니다")
+
+    if db.query(Notification).filter(Notification.user_id == user_id).first():
+        raise HTTPException(409, "알림 기록이 연결된 계정입니다")
+
+    try:
+        db.query(SocialAccount).filter(
+            SocialAccount.user_id == user_id
+        ).delete(synchronize_session=False)
+
+        db.delete(user)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "message": "보호자 계정 삭제 완료",
+        "user_id": user_id,
+    }
