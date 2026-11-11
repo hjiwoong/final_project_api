@@ -75,12 +75,16 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     name = Column(String(100), nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.PARENT)
-    address_encrypted = Column(String(1024), nullable=True)
-    latitude_encrypted = Column(String(1024), nullable=True)
-    longitude_encrypted = Column(String(1024), nullable=True)
-    signup_method = Column(String(20), nullable=True)
+    # 최초 가입 경로: APP / GOOGLE / ADMIN / UNKNOWN (기존 계정은 database/orm.py 가 UNKNOWN 으로 이전)
+    signup_method = Column(
+        String(20), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
+    )
     push_token = Column(String(512), nullable=True)
-    deletion_requested_at = Column(DateTime, nullable=True)
+    # 주소·좌표는 Fernet 암호문으로 저장 (services/location_crypto.py)
+    address_encrypted = Column(String(1024), nullable=True)
+    latitude_encrypted = Column(String(255), nullable=True)
+    longitude_encrypted = Column(String(255), nullable=True)
+    deletion_requested_at = Column(DateTime, nullable=True, index=True)   # 계정 삭제 유예 시작 시각
     created_at = Column(DateTime, default=datetime.now)
 
     guardians = relationship("Guardian", back_populates="user")

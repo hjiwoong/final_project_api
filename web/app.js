@@ -140,7 +140,7 @@
 
   function chartSvg(daily) {
     if (!daily.length) {
-      return '<p class="empty">이 기간에 운행 기록이 없습니다.</p>';
+      return `<div class="dashboard-chart-empty" role="status"><span class="dashboard-chart-empty-icon" aria-hidden="true">▥</span><strong>아직 운행 데이터가 없습니다</strong><p>운행이 기록되면 이곳에 일별 운행 및 경고 추이가 표시됩니다.</p></div>`;
     }
 
     const W = 1000;
@@ -270,7 +270,7 @@
       api('/stats/summary?' + new URLSearchParams({ ...(from ? { from } : {}), simulation_mode: String(dashSimulation) })),
       api('/alerts?' + new URLSearchParams({ status: 'OPEN', limit: '5', simulation_mode: String(dashSimulation) })),
       api('/trips?' + new URLSearchParams({ limit: '100', ...(from ? { from } : {}), simulation_mode: String(dashSimulation) })),
-      api('/alerts?' + new URLSearchParams({ limit: '5', ...(from ? { from } : {}), simulation_mode: String(dashSimulation) })),
+      api('/alerts?' + new URLSearchParams({level: 'URGENT', limit: '5', ...(from ? { from } : {}), simulation_mode: String(dashSimulation)})),
       api('/web/buses'),
       api('/web/child-requests?status=PENDING&limit=4').catch(() => null),
       api('/trips?' + new URLSearchParams({ status: 'IN_PROGRESS', simulation_mode: String(dashSimulation), limit: '100' }))
@@ -348,8 +348,8 @@
         <div class="dashboard-bottom-grid">
           <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 위험 경고</h2><p>최근 발생한 경고 기록</p></div><a href="#/alerts">전체 보기 →</a></div><div class="dashboard-feed">${recentAlerts.map(a => `<a href="#/alerts/${a.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon ${a.status === 'RESOLVED' ? 'resolved' : 'danger'}">
             ${a.status === 'RESOLVED' ? '✓' : '!'}
-          </span><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<p class="empty">해당 기간 경고가 없습니다.</p>'}</div></section>
-          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 운행 기록</h2><p>최근 운행 결과 및 상태</p></div><a href="#/trips">전체 보기 →</a></div><div class="dashboard-feed">${recentTrips.map(t => `<a href="#/trips/${t.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon bus">🚌</span><span class="dashboard-feed-info"><strong>${esc(t.bus_name || '차량 정보 없음')}</strong><small>${fmtTime(t.started_at)} · 승차 ${num(t.boarding_count)}명 / 하차 ${num(t.alighted_count)}명</small></span><span class="dashboard-feed-tags">${tripStatus(t)}</span></a>`).join('') || '<p class="empty">해당 기간 운행 기록이 없습니다.</p>'}</div></section>
+          </span><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">✓</span><strong>최근 경고 없음</strong><small>선택한 기간에 발생한 경고가 없습니다.</small></div>'}</div></section>
+          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 운행 기록</h2><p>최근 운행 결과 및 상태</p></div><a href="#/trips">전체 보기 →</a></div><div class="dashboard-feed">${recentTrips.map(t => `<a href="#/trips/${t.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon bus">🚌</span><span class="dashboard-feed-info"><strong>${esc(t.bus_name || '차량 정보 없음')}</strong><small>${t.started_at ? esc(new Date(t.started_at).toLocaleString('ko-KR', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false})) : '시작 시간 미기록'}· 승차 ${num(t.boarding_count)}명 / 하차 ${num(t.alighted_count)}명</small></span><span class="dashboard-feed-tags">${tripStatus(t)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">▤</span><strong>운행 기록 없음</strong><small>운행이 시작되면 기록이 표시됩니다.</small></div>'}</div></section>
           <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>보호자 연결 요청</h2><p>승인을 기다리는 신청</p></div><a href="#/requests">전체 보기 →</a></div><div class="dashboard-feed">${requests ? (requests.items || []).map(r => `<a href="#/requests" class="dashboard-feed-row"><span class="dashboard-feed-icon person">♙</span><span class="dashboard-feed-info"><strong>${esc(r.user?.name || '신청자')}</strong><small>${esc(r.child_name || '학생 정보 없음')}${r.class_name ? ` (${esc(r.class_name)})` : ''} · ${fmtTime(r.created_at)}</small></span><span class="badge warn">승인 대기</span></a>`).join('') || '<div class="dashboard-empty-state"><span class="dashboard-empty-icon">✓</span><p>대기 중인 연결 요청이 없습니다.</p></div>'
       : '<div class="dashboard-empty-state"><p>연결 요청 정보를 불러올 수 없습니다.</p></div>'}</div></section>
         </div>
@@ -399,10 +399,20 @@
 
     const drivers = users.filter(u => u.role === 'ADMIN');
 
+    const fmtTripDate = (value) => {
+      if (!value) return '';
+
+      const date = new Date(value);
+
+      if (Number.isNaN(date.getTime())) return '';
+
+      return `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
+    };
+
     const stats = [
       ['전체 운행', summary.trip_count, '전체 운행 기록', 'bus'],
-      ['운행 중', summary.in_progress_count, '현재 진행 상태로 기록된 운행', 'running'],
-      ['정상 종료', summary.closed_count, '종료된 운행 기록', 'done'],
+      ['운행 중', summary.in_progress_count, '현재 진행 중인 운행', 'running'],
+      ['운행 완료', summary.closed_count, '완료된 운행 기록', 'done'],
       ['미하차 의심', summary.result_counts.MISSED || 0, '안전 확인이 필요한 운행', 'danger']
     ];
 
@@ -439,7 +449,7 @@
                 기사: ${esc(users.find(u => Number(u.id) === Number(t.driver_id))?.name || '미배정')}
               </span>
 
-              <span class="trip-record-time">
+             <span class="trip-record-time">
                 <svg
                   viewBox="0 0 24 24"
                   width="15"
@@ -455,6 +465,7 @@
                   <path d="M12 7v5l3 2"/>
                 </svg>
               
+                ${fmtTripDate(t.started_at || t.scheduled_start_at)}
                 ${fmtTripTime(t.started_at || t.scheduled_start_at)}
                 →
                 ${fmtTripTime(t.ended_at || t.scheduled_end_at)}
@@ -474,7 +485,9 @@
           </div>
           <div>
             <span>잔류</span>
-            <strong>${num(t.remaining_count)}명</strong>
+            <strong class="${Number(t.remaining_count ?? 0) > 0 ? 'remaining-warning' : 'remaining-zero'}">
+              ${num(t.remaining_count)}명
+            </strong>
           </div>
         </div>
     
@@ -572,32 +585,27 @@
               운행 중
             </button>
           
-            <button type="button" class="trip-status-tab" disabled
-              title="운행 예정 기능은 추후 지원됩니다">
-              운행 예정
-            </button>
-          
             <button type="button"
               class="trip-status-tab ${tripsState.status === 'CLOSED' ? 'active' : ''}"
               data-act="trips-status-tab" data-status="CLOSED">
               운행 완료
             </button>
-          
-            <button type="button" class="trip-status-tab" disabled
-              title="운행 취소 기능은 추후 지원됩니다">
-              운행 취소
-            </button>
+         
           </div>
           
           <div class="filters trip-filters">
           <form class="trip-search-form" data-form="trip-search">
-            <input
-              type="search"
-              name="search"
-              placeholder="버스명, 차량번호, 기사 이름 검색"
-              aria-label="운행 기록 검색"
-              value="${esc(tripsState.search)}"
-            >
+            <label class="trip-search-field">
+              키워드 검색
+              <input
+                type="search"
+                name="search"
+                placeholder="버스명, 차량번호, 기사 이름 검색"
+                aria-label="운행 기록 검색"
+                value="${esc(tripsState.search)}"
+              >
+            </label>
+          
             <button type="submit" class="btn primary">검색</button>
           </form>
             <label>버스 선택
@@ -646,7 +654,21 @@
     };
   }
 
-  const imgUrl = (eventId) => `/events/${eventId}/image?token=${encodeURIComponent(token)}`;
+  // 사진은 Authorization 헤더로 받아 blob URL 로 표시한다 (토큰을 URL 에 노출하지 않음)
+  async function fetchPhotoUrl(eventId) {
+    const response = await fetch(`/events/${eventId}/image`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`사진 조회 실패 (${response.status})`);
+    }
+
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  }
 
   function eventList(events) {
     if (!events.length) {
@@ -670,7 +692,7 @@
                   aria-label="${esc(label)} 사진 확대"
                 >
                   <img
-                    src="${imgUrl(e.id)}"
+                    data-photo-id="${Number(e.id)}"
                     alt="${esc(label)} 실내 사진"
                     loading="lazy"
                   >
@@ -709,7 +731,56 @@
     `;
   }
 
-   function openTripPhoto(photoId, label) {
+  async function loadEventPhotos() {
+    const images = document.querySelectorAll(
+      '.trip-event-photo-btn img[data-photo-id]'
+    );
+
+    function showPhotoError(img) {
+      const button = img.closest('.trip-event-photo-btn');
+      if (!button || !button.isConnected) return;
+
+      const placeholder = document.createElement('div');
+      placeholder.className =
+        'trip-event-thumb trip-event-no-image';
+
+      const message = document.createElement('span');
+      message.textContent = '사진을 불러올 수 없습니다';
+
+      placeholder.appendChild(message);
+      button.replaceWith(placeholder);
+    }
+
+    for (const img of images) {
+      const eventId = Number(img.dataset.photoId);
+
+      try {
+        const url = await fetchPhotoUrl(eventId);
+
+        if (!img.isConnected) {
+          URL.revokeObjectURL(url);
+          continue;
+        }
+
+        img.addEventListener('load', () => {
+          URL.revokeObjectURL(url);
+        }, { once: true });
+
+        img.addEventListener('error', () => {
+          URL.revokeObjectURL(url);
+          showPhotoError(img);
+        }, { once: true });
+
+        img.src = url;
+
+      } catch (err) {
+        console.error('이벤트 사진 로딩 실패:', err);
+        showPhotoError(img);
+      }
+    }
+  }
+
+  async function openTripPhoto(photoId, label) {
     const oldModal = document.querySelector('.trip-photo-modal');
     if (oldModal) oldModal.remove();
 
@@ -731,7 +802,6 @@
         </div>
 
         <img
-          src="${imgUrl(photoId)}"
           alt="${esc(label)} 실내 사진"
         >
       </div>
@@ -756,6 +826,32 @@
     });
 
     document.addEventListener('keydown', onKeyDown);
+
+    try {
+      const photoUrl = await fetchPhotoUrl(photoId);
+
+      if (!modal.isConnected) {
+        URL.revokeObjectURL(photoUrl);
+        return;
+      }
+
+      const img = modal.querySelector('img');
+
+      img.addEventListener('load', () => {
+        URL.revokeObjectURL(photoUrl);
+      }, { once: true });
+
+      img.addEventListener('error', () => {
+        URL.revokeObjectURL(photoUrl);
+      }, { once: true });
+
+      img.src = photoUrl;
+
+    } catch (err) {
+      console.error('확대 사진 로딩 실패:', err);
+      const img = modal.querySelector('img');
+      if (img) img.alt = '사진을 불러올 수 없습니다';
+    }
   }
 
   document.addEventListener('click', (e) => {
@@ -793,7 +889,7 @@
             <strong>긴급 안전 확인 필요</strong>
             <p>
               기록된 잔류 의심 ${num(remaining)}명 ·
-              열린 긴급 경고 ${num(urgentAlerts.length)}건
+              미해결 긴급 경고 ${num(urgentAlerts.length)}건
             </p>
             <a href="#/alerts/${urgentAlerts[0].id}">
               경고 상세 확인 →
@@ -801,40 +897,55 @@
           </div>
         </div>
       `
-      : t.result === 'MISSED'
+      : openAlerts.length > 0
         ? `
           <div class="trip-safety-panel warning">
             <div class="trip-safety-icon">⚠️</div>
             <div class="trip-safety-content">
-              <strong>미하차 의심 기록</strong>
+              <strong>안전 경고 확인 필요</strong>
               <p>
-                잔류 의심 ${num(remaining)}명 ·
-                현재 열린 긴급 경고는 없습니다.
+                미해결 경고 ${num(openAlerts.length)}건이 있습니다.
               </p>
+              <a href="#/alerts/${openAlerts[0].id}">
+                경고 상세 확인 →
+              </a>
             </div>
           </div>
         `
-        : `
-          <div class="trip-safety-panel safe">
-            <div class="trip-safety-icon">✓</div>
-            <div class="trip-safety-content">
-              <strong>
-                ${t.result === 'OK'
-                  ? '하차 확인 완료'
-                  : '열린 긴급 미하차 경고 없음'}
-              </strong>
-              <p>
-                ${t.result === 'OK'
-                  ? '기록된 운행 결과가 정상입니다.'
-                  : '운행 결과와 사진 기록을 확인해 주세요.'}
-              </p>
+        : t.result === 'MISSED'
+          ? `
+            <div class="trip-safety-panel warning">
+              <div class="trip-safety-icon">⚠️</div>
+              <div class="trip-safety-content">
+                <strong>미하차 의심 기록</strong>
+                <p>
+                  잔류 의심 ${num(remaining)}명 ·
+                  현재 미해결 경고는 없습니다.
+                </p>
+              </div>
             </div>
-          </div>
-        `;
+          `
+          : `
+            <div class="trip-safety-panel safe">
+              <div class="trip-safety-icon">✓</div>
+              <div class="trip-safety-content">
+                <strong>
+                  ${t.result === 'OK'
+                    ? '운행 결과 정상'
+                    : '현재 미해결 경고 없음'}
+                </strong>
+                <p>
+                  ${t.result === 'OK'
+                    ? '기록된 운행 결과가 정상이며, 현재 미해결 경고가 없습니다.'
+                    : '운행 결과와 사진 기록을 확인해 주세요.'}
+                </p>
+              </div>
+            </div>
+          `;
 
     const metrics = [
       {
-        label: '탑승 예정',
+        label: '배정 학생',
         value: t.expected_count,
         note: '배정 기준',
         type: 'expected'
@@ -927,7 +1038,11 @@
               </div>
               <div>
                 <dt>차량번호</dt>
-                <dd>${esc(t.plate_no || bus?.plate_no || '미등록')}</dd>
+                <dd>
+                  <a href="#/trips/${t.id}">
+                    ${esc(t.plate_no || '차량번호 미등록')} →
+                  </a>
+                </dd>
               </div>
               <div>
                 <dt>담당 기사</dt>
@@ -995,12 +1110,18 @@
   }
 
   function fixImages(root) {
-    root.querySelectorAll('img').forEach((img) => img.addEventListener('error', () => {
-      const s = document.createElement('span');
-      s.className = 'nophoto';
-      s.textContent = '사진을 불러올 수 없습니다';
-      img.replaceWith(s);
-    }));
+    root.querySelectorAll('img').forEach((img) => {
+      // 검출 사진은 loadEventPhotos 가 직접 오류를 처리한다
+      if (img.dataset.photoId) return;
+      img.addEventListener('error', () => {
+        const s = document.createElement('span');
+        s.className = 'nophoto';
+        s.textContent = '사진을 불러올 수 없습니다';
+        img.replaceWith(s);
+      });
+    });
+
+    loadEventPhotos();
   }
 
   // ======================================================================
@@ -1046,7 +1167,7 @@
 
     const mode = String(alertsState.simulation);
 
-    const [data, summary, openSummary, urgentSummary] =
+    const [data, summary, urgentSummary] =
       await Promise.all([
         alertsState.status === 'UNRESOLVED'
           ? Promise.all([
@@ -1076,16 +1197,26 @@
 
         api('/alerts?' + new URLSearchParams({
           limit: '1',
-          status: 'OPEN',
-          simulation_mode: mode
-        })),
-
-        api('/alerts?' + new URLSearchParams({
-          limit: '1',
           level: 'URGENT',
           simulation_mode: mode
         }))
       ]);
+
+    const unresolvedTotal = await Promise.all([
+      api('/alerts?' + new URLSearchParams({
+        limit: '1',
+        status: 'OPEN',
+        simulation_mode: mode
+      })),
+      api('/alerts?' + new URLSearchParams({
+        limit: '1',
+        status: 'ACKED',
+        simulation_mode: mode
+      }))
+    ]).then(([open, acked]) =>
+      (Number(open.total) || 0) +
+      (Number(acked.total) || 0)
+    );
 
     const stats = [
       {
@@ -1096,27 +1227,67 @@
         icon: '◉'
       },
       {
-        label: '미확인 경고',
-        value: openSummary.total,
-        note: '관리자 확인이 필요한 경고',
+        label: '미해결 경고',
+        value: unresolvedTotal,
+        note: `${alertsState.simulation ? '시뮬레이션' : '실제 운행'} · 미확인 + 확인함`,
         type: 'open',
         icon: '!'
       },
       {
-        label: '긴급 경고',
+        label: '긴급 경고 이력',
         value: urgentSummary.total,
-        note: '긴급 수준으로 기록된 경고',
+        note: '해결 여부와 관계없이 발생한 긴급 경고',
         type: 'urgent',
         icon: '⚠'
       }
     ];
 
+    const alertStatusLabel = {
+      '': '전체',
+      UNRESOLVED: '미해결',
+      OPEN: '미확인',
+      ACKED: '확인함',
+      RESOLVED: '해결됨'
+    }[alertsState.status] ?? '전체';
+
+    const alertListDescription =
+      `${alertStatusLabel} 경고 ${num(data.total)}건 · ` +
+      `${alertsState.simulation ? '시뮬레이션' : '실제 운행'}`;
+
     const rows = data.items.map(a => `
-      <tr class="${a.level === 'URGENT' ? 'alert-urgent-row' : ''}">
+     <tr class="${
+        a.status === 'RESOLVED'
+          ? ''
+          : a.level === 'URGENT'
+            ? 'alert-urgent-row'
+            : a.status === 'OPEN'
+              ? 'alert-open-row'
+              : a.status === 'ACKED'
+                ? 'alert-acked-row'
+                : ''
+      }">
         <td>${badge(LEVEL, a.level)}</td>
         <td class="alert-message-cell">
-          <a href="#/alerts/${a.id}">
-            ${esc(a.message)}
+          <a href="#/alerts/${a.id}" class="alert-message-link">
+            ${(() => {
+              const message = a.message || '';
+              const separator = ' · ';
+              const index = message.indexOf(separator);
+        
+              if (index === -1) {
+                return `<strong>${esc(message)}</strong>`;
+              }
+        
+              const title = message.slice(0, index);
+              const description = message.slice(index + separator.length);
+        
+              return `
+                <strong>${esc(title)}</strong>
+                <span class="alert-message-description">
+                  ${esc(description)}
+                </span>
+              `;
+            })()}
           </a>
         </td>
         <td>${esc(a.bus_name || '-')}</td>
@@ -1166,7 +1337,7 @@
             <div class="alert-list-heading">
               <div>
                 <h2>안전 경고 목록</h2>
-                <p>선택한 조건에 맞는 경고 ${num(data.total)}건</p>
+                <p>${esc(alertListDescription)}</p>
               </div>
   
               <div class="seg" aria-label="운행 구분">
@@ -1216,20 +1387,26 @@
                   ${rows || `
                     <tr>
                       <td colspan="6" class="empty">
-                        조건에 맞는 경고가 없습니다.
+                        <div class="alert-empty-state">
+                          <div class="alert-empty-icon">✓</div>
+                          <strong>조건에 맞는 경고가 없습니다.</strong>
+                          <p>다른 처리 상태를 선택하거나 시뮬레이션 경고를 확인해 보세요.</p>
+                        </div>
                       </td>
                     </tr>
                   `}
                 </tbody>
-              </table>
-            </div>
+                </table>
+                </div>
   
-            ${pager(
-              data.total,
-              alertsState.offset,
-              ALERT_LIMIT,
-              'alerts'
-            )}
+            ${data.total > 0
+              ? pager(
+                  data.total,
+                  alertsState.offset,
+                  ALERT_LIMIT,
+                  'alerts'
+                )
+              : ''}
           </section>
         </div>
       `
@@ -1242,29 +1419,32 @@
     const isResolved = a.status === 'RESOLVED';
 
     const steps = [
-      `<li>
+      `<li class="history-step history-created">
         <span class="when">${fmtTime(a.created_at)}</span>
-        <strong>경고 발생</strong>
+        <div class="history-step-content"><strong>경고 발생</strong><p>안전 경고가 시스템에 등록되었습니다.</p></div>
       </li>`
     ];
 
     if (a.acked_at) {
       steps.push(`
-        <li>
+        <li class="history-step history-acked">
           <span class="when">${fmtTime(a.acked_at)}</span>
-          <strong>경고 확인</strong>
+          <div class="history-step-content">
+            <strong>관리자 확인 완료</strong>
+            <p>관리자가 경고를 확인했습니다.</p>
+          </div>
         </li>
       `);
     }
 
     if (a.resolved_at) {
       steps.push(`
-        <li>
+        <li class="history-step history-resolved">
           <span class="when">${fmtTime(a.resolved_at)}</span>
-          <strong>해결 처리</strong>
+          <div class="history-step-content"><strong>해결 처리 완료</strong>
           ${a.note
             ? `<p class="alert-history-note">${esc(a.note)}</p>`
-            : ''}
+            : '<p>경고가 해결 상태로 변경되었습니다.</p>'}</div>
         </li>
       `);
     }
@@ -1295,10 +1475,29 @@
       </form>
     `;
 
+    const metricDescription = isResolved
+      ? '현재 운행 데이터 기준 · 경고 발생 당시 검출 결과와 다를 수 있습니다.'
+      : '현재 운행 데이터 기준 · 실제 안전 상태를 확인해 주세요.';
+
     const metrics = [
-      ['승차 인원', t.boarding_count, '승차 기록 기준', 'boarding'],
-      ['하차 인원', t.alighted_count, '하차 기록 기준', 'alighted'],
-      ['종점 잔류', t.remaining_count, '미하차 의심 인원', 'remaining']
+      [
+        '현재 승차 기록',
+        t?.boarding_count,
+        metricDescription,
+        'boarding'
+      ],
+      [
+        '현재 하차 기록',
+        t?.alighted_count,
+        metricDescription,
+        'alighted'
+      ],
+      [
+        '현재 종점 잔류',
+        t?.remaining_count,
+        metricDescription,
+        'remaining'
+      ]
     ];
 
     return {
@@ -1315,11 +1514,6 @@
               <p class="sub">
                 안전 경고의 발생 정보와 조치 내역을 확인합니다.
               </p>
-            </div>
-  
-            <div class="alert-detail-badges">
-              ${badge(LEVEL, a.level)}
-              ${badge(ALERT_STATUS, a.status)}
             </div>
           </header>
   
@@ -1354,29 +1548,22 @@
                   ${label}
                 </span>
                 <div class="alert-detail-metric-value">
-                  ${num(value)}<small>명</small>
+                  ${value == null ? '-' : num(value)}
+                  ${value == null ? '' : '<small>명</small>'}
                 </div>
                 <p>${note}</p>
               </div>
             `).join('')}
           </div>
   
+          <div class="alert-detail-workspace">
+          <div class="alert-detail-primary">
           <section class="alert-detail-section">
             <div class="alert-detail-section-head">
               <h2>경고 기본 정보</h2>
             </div>
   
             <dl class="alert-detail-facts">
-              <div>
-                <dt>경고 수준</dt>
-                <dd>${badge(LEVEL, a.level)}</dd>
-              </div>
-  
-              <div>
-                <dt>처리 상태</dt>
-                <dd>${badge(ALERT_STATUS, a.status)}</dd>
-              </div>
-  
               <div>
                 <dt>검출 신뢰도 낮음</dt>
                 <dd>
@@ -1387,11 +1574,13 @@
               </div>
   
               <div>
-                <dt>관련 운행</dt>
+                <dt>차량번호</dt>
                 <dd>
-                  <a href="#/trips/${t.id}">
-                    운행 #${t.id} 상세 보기 →
-                  </a>
+                  ${t ? `
+                    <a href="#/trips/${t.id}">
+                      ${esc(t.plate_no || '차량번호 미등록')} →
+                    </a>
+                  ` : '차량 정보 없음'}
                 </dd>
               </div>
             </dl>
@@ -1400,16 +1589,23 @@
           ${a.llm_summary ? `
             <section class="alert-detail-section">
               <div class="alert-detail-section-head">
-                <h2>AI 분석 요약</h2>
-                <span class="alert-detail-section-tag">AI 분석</span>
+                <h2>경고 발생 당시 AI 분석</h2>
+                <span class="alert-detail-section-tag">발생 시점</span>
               </div>
   
+              <p class="alert-detail-context-note">
+                아래 내용은 경고가 발생했을 당시의 분석 기록입니다.
+                위 인원 통계는 현재 운행 기록 기준으로,
+                경고 발생 당시 수치와 다를 수 있습니다.
+              </p>
               <div class="alert-detail-ai">
                 <p>${esc(a.llm_summary)}</p>
               </div>
             </section>
           ` : ''}
   
+          </div>
+          <div class="alert-detail-secondary">
           <section class="alert-detail-section">
             <div class="alert-detail-section-head">
               <h2>처리 이력</h2>
@@ -1423,6 +1619,8 @@
             </ul>
           </section>
   
+          </div>
+          </div>
           <div class="alert-detail-grid">
   
             ${!isResolved ? `
@@ -1488,18 +1686,22 @@
 
     const needStudents = !reqState.status || reqState.status === 'PENDING';
 
-    const [data, students] = await Promise.all([
+    // 상태별 건수는 현재 페이지가 아니라 전체 기준으로 서버에서 받아온다
+    const [data, students, pending, approved, rejected] = await Promise.all([
       api('/web/child-requests?' + p),
-      needStudents ? api('/web/students') : Promise.resolve([])
+      needStudents ? api('/web/students') : Promise.resolve([]),
+      api('/web/child-requests?status=PENDING&limit=1'),
+      api('/web/child-requests?status=APPROVED&limit=1'),
+      api('/web/child-requests?status=REJECTED&limit=1')
     ]);
 
     const studentLabel = (s) =>
       `${s.name}${s.class_name ? ` (${s.class_name})` : ' (반 없음)'}`;
 
     const counts = {
-      pending: data.items.filter(r => r.status === 'PENDING').length,
-      approved: data.items.filter(r => r.status === 'APPROVED').length,
-      rejected: data.items.filter(r => r.status === 'REJECTED').length
+      pending: pending.total,
+      approved: approved.total,
+      rejected: rejected.total
     };
 
     const card = (r) => {
@@ -1527,10 +1729,12 @@
       if (r.status !== 'PENDING') {
         const tail = r.status === 'APPROVED'
           ? `연결된 학생: ${r.student ? esc(studentLabel(r.student)) : '-'}`
-          : `거절 사유: ${esc(r.reject_reason || '(없음)')}`;
+          : r.reject_reason?.trim()
+            ? `거절 사유: ${esc(r.reject_reason)}`
+            : '거절 사유가 등록되지 않았습니다.';
 
         return `
-          <li class="req req-v2 done">
+          <li class="req req-v2 done ${r.status === 'APPROVED' ? 'approved' : 'rejected'}">
             ${head}
             <div class="req-completed">
               <span class="req-completed-label">처리 결과</span>
@@ -1625,7 +1829,7 @@
               <div class="request-summary-value">
                 ${num(counts.pending)}<small>건</small>
               </div>
-              <p>현재 페이지의 승인 대기 요청</p>
+              <p>전체 승인 대기 요청</p>
             </div>
   
             <div class="request-summary-card approved">
@@ -1633,7 +1837,7 @@
               <div class="request-summary-value">
                 ${num(counts.approved)}<small>건</small>
               </div>
-              <p>현재 페이지의 승인 완료 요청</p>
+              <p>전체 승인 완료 요청</p>
             </div>
   
             <div class="request-summary-card rejected">
@@ -1641,7 +1845,7 @@
               <div class="request-summary-value">
                 ${num(counts.rejected)}<small>건</small>
               </div>
-              <p>현재 페이지의 거절된 요청</p>
+              <p>전체 거절된 요청</p>
             </div>
           </div>
   
@@ -1680,7 +1884,9 @@
                 </div>`
             }
   
-            ${pager(data.total, reqState.offset, REQ_LIMIT, 'requests')}
+            ${data.total > REQ_LIMIT
+              ? pager(data.total, reqState.offset, REQ_LIMIT, 'requests')
+              : ''}
           </section>
         </div>
       `
@@ -1700,7 +1906,6 @@
     ]);
     const parents = users.filter((u) => u.role === 'PARENT');
     const totalStudents = allStudents.length;
-    const unlinkedStudents = null;
     if (!data.items.length && rosterState.offset > 0) { rosterState.offset = 0; return pageStudents(); }
     const editing = rosterState.edit ? data.items.find((s) => s.id === rosterState.edit) : null;
     if (rosterState.edit && !editing) rosterState.edit = null;
@@ -1708,8 +1913,37 @@
     const rows = data.items.map((s) => `<tr>
       <td><input type="checkbox" data-sel value="${s.id}" aria-label="${esc(s.name)} 선택"></td>
       <td><strong class="student-name">${esc(s.name)}</strong></td><td>${esc(s.class_name || '-')}</td>
-      <td class="wrap">${s.guardians.length ? s.guardians.map((g) => `${esc(g.name)}${g.relation ? `(${esc(g.relation)})` : ''}`).join(', ') : '<span class="muted-text">연결된 보호자 없음</span>'}</td>
-      <td>${fmtDate(s.consent_at)}</td>
+      <td class="student-guardian-cell">
+        ${s.guardians.length
+          ? `
+            <details class="student-guardian-details">
+              <summary>
+                보호자 ${s.guardians.length}명 보기
+                <span class="student-guardian-chevron" aria-hidden="true">⌄</span>
+              </summary>
+      
+              <div class="student-guardian-list">
+                ${s.guardians.map((g) => `
+                  <div class="student-guardian-item">
+                    <span class="student-guardian-name">
+                      ${esc(g.name)}
+                    </span>
+      
+                    <span class="student-guardian-relation">
+                      ${g.relation ? esc(g.relation) : '관계 미입력'}
+                    </span>
+                  </div>
+                `).join('')}
+              </div>
+            </details>
+          `
+          : '<span class="muted-text">연결된 보호자 없음</span>'}
+      </td>
+      <td>
+        ${s.consent_at
+          ? fmtDate(s.consent_at)
+          : '<span class="muted-text">미등록</span>'}
+      </td>
       <td class="rowact"><button type="button" class="btn small" data-act="roster-edit" data-id="${s.id}">수정</button>
         <button type="button" class="btn small danger" data-act="roster-del" data-id="${s.id}" data-name="${esc(s.name)}">삭제</button></td></tr>`).join('');
 
@@ -1808,12 +2042,21 @@
         </form>
         ${editBox}
         <div class="bulkbar">
-          <button type="button" class="btn danger" data-act="roster-del-sel">선택한 학생 삭제</button>
+          <button
+            type="button"
+            class="btn danger"
+            data-act="roster-del-sel"
+            disabled
+          >
+            선택한 학생 0명 삭제
+          </button>
           ${classBtn}
         </div>
         <div class="tablewrap"><table><thead><tr><th><input type="checkbox" data-act="roster-selall" aria-label="이 페이지 전체 선택"></th><th>이름</th><th>반</th><th>보호자</th><th>보호자 동의일</th><th></th></tr></thead>
         <tbody>${rows || '<tr><td colspan="6" class="empty">조건에 맞는 학생이 없습니다. 아래에서 학생을 등록하세요.</td></tr>'}</tbody></table></div>
-        ${pager(data.total, rosterState.offset, ROSTER_LIMIT, 'roster')}
+        ${data.total > ROSTER_LIMIT
+          ? pager(data.total, rosterState.offset, ROSTER_LIMIT, 'roster')
+          : ''}
         <section class="student-registration" aria-label="학생·보호자 등록">
           <details class="registration-toggle">
             <summary>학생·보호자 등록 및 연결 <span>클릭해서 펼치기</span></summary>
@@ -1839,8 +2082,45 @@
             <button type="submit" class="btn primary">보호자 연결</button></form>
      </div>
     </details>
+  </section>
+  <section class="parent-location-panel" aria-labelledby="parent-location-heading">
+    <h2 id="parent-location-heading">보호자 주소 확인</h2>
+    <p class="muted-text">선택한 보호자의 저장된 주소와 좌표를 조회합니다. 이 정보는 이 화면에서만 표시됩니다.</p>
+    <div class="parent-location-controls">
+      <label for="parent-location-user">보호자 계정
+        <select id="parent-location-user">
+          <option value="">보호자를 선택하세요</option>
+          ${options(parents, (u) => u.id, (u) => `${u.name} ${u.email}`)}
+        </select>
+      </label>
+      <button type="button" class="btn" data-act="parent-location-view">주소 조회</button>
+    </div>
+    <div id="parent-location-result" class="parent-location-result" aria-live="polite" hidden></div>
   </section>`,
     };
+  }
+
+  function renderParentLocation(location) {
+    const result = $('#parent-location-result');
+    if (!result) return;
+    const address = location.address || '주소 정보 없음';
+    const hasCoordinates = location.latitude != null && location.longitude != null
+      && Number.isFinite(Number(location.latitude)) && Number.isFinite(Number(location.longitude));
+    const latitude = hasCoordinates ? Number(location.latitude) : null;
+    const longitude = hasCoordinates ? Number(location.longitude) : null;
+    const coordinates = hasCoordinates
+      ? `${latitude}, ${longitude}` : '좌표 정보 없음';
+    const mapSearch = encodeURIComponent(hasCoordinates
+      ? `${latitude},${longitude}` : location.address || '');
+    result.innerHTML = `
+      <dl class="facts parent-location-facts">
+        <div><dt>주소</dt><dd>${esc(address)}</dd></div>
+        <div><dt>위도 · 경도</dt><dd>${esc(coordinates)}</dd></div>
+      </dl>
+      ${location.address || hasCoordinates
+        ? `<p><a class="btn small" href="https://map.naver.com/p/search/${mapSearch}" target="_blank" rel="noopener noreferrer">네이버 지도에서 보기</a></p>` : ''}
+    `;
+    result.hidden = false;
   }
 
   // ======================================================================
@@ -1848,11 +2128,26 @@
   // ======================================================================
   async function pageBuses() {
     const [buses, users, students] = await Promise.all([api('/web/buses'), api('/web/users'), api('/web/students')]);
+    window.busEditData = buses;
     const admins = users.filter((u) => u.role === 'ADMIN');
-    const driverName = (id) => (admins.find((u) => u.id === id) || {}).name || '-';
+    const driverName = (id) =>
+      admins.find((u) => Number(u.id) === Number(id))?.name || '미지정';
     const assigned = await Promise.all(buses.map((b) => api(`/web/buses/${b.id}/students`)));
     const assignedIds = new Set(
       assigned.flat().map((s) => s.id)
+    );
+
+    const assignmentCounts = new Map();
+
+    assigned.forEach((busStudents) => {
+      busStudents.forEach((s) => {
+        const id = Number(s.id);
+        assignmentCounts.set(id, (assignmentCounts.get(id) || 0) + 1);
+      });
+    });
+
+    const studentInfoById = new Map(
+      students.map((s) => [Number(s.id), s])
     );
 
     const totalBuses = buses.length;
@@ -1860,9 +2155,84 @@
     const unassignedStudents = students.filter(
       (s) => !assignedIds.has(s.id)
     ).length;
-    const rows = buses.map((b, i) => `<tr><td>${esc(b.name)}</td><td>${esc(b.plate_no)}</td><td>${esc(driverName(b.driver_id))}</td>
-      <td class="num">${b.student_count}</td>
-      <td class="wrap">${assigned[i].length ? assigned[i].map((s) => esc(s.name)).join(', ') : '<span class="muted-text">배정된 학생 없음</span>'}</td></tr>`).join('');
+    const rows = buses.map((b, i) => `
+      <tr>
+        <td>${esc(b.name)}</td>
+        <td>${esc(b.plate_no)}</td>
+        <td>${esc(driverName(b.driver_id))}</td>
+    
+        <td class="num">${assigned[i].length}</td>
+    
+        <td class="bus-student-cell">
+          ${assigned[i].length
+            ? `
+              <details class="bus-student-details">
+                <summary>
+                  학생 ${assigned[i].length}명 보기
+                  <span class="bus-student-chevron" aria-hidden="true">⌄</span>
+                </summary>
+    
+                <div class="bus-student-list">
+                  ${assigned[i].map((s) => `
+                    <div class="bus-student-item">
+                     <span class="bus-student-name">
+                        <strong>${esc(s.name)}</strong>
+                      
+                        ${studentInfoById.get(Number(s.id))?.class_name
+                          ? `<span class="bus-student-class">
+                              ${esc(studentInfoById.get(Number(s.id)).class_name)}
+                            </span>`
+                          : ''}
+                      
+                        ${assignmentCounts.get(Number(s.id)) > 1
+                          ? `<span class="bus-student-multiple">
+                              복수 배정
+                            </span>`
+                          : ''}
+                     </span>
+    
+                      <button
+                        type="button"
+                        class="btn bus-unassign-btn"
+                        data-act="bus-unassign"
+                        data-bus-id="${Number(b.id)}"
+                        data-student-id="${Number(s.id)}"
+                        data-student-name="${esc(s.name)}"
+                      >
+                        배정 해제
+                      </button>
+                    </div>
+                  `).join('')}
+                </div>
+              </details>
+            `
+            : '<span class="muted-text">배정된 학생 없음</span>'}
+        </td>
+    
+        <td>
+          <button
+            type="button"
+            class="btn"
+            data-act="bus-edit"
+            data-bus-id="${Number(b.id)}"
+          >수정</button>
+        </td>
+      </tr>
+    `).join('');
+
+    const assignedByBus = Object.fromEntries(
+      buses.map((b, i) => [
+        String(b.id),
+        assigned[i].map((s) => Number(s.id))
+      ])
+    );
+
+    const studentOptions = students.map((s) => ({
+      id: Number(s.id),
+      name: s.name,
+      class_name: s.class_name
+    }));
+
     return {
       html: `
         <header class="pagehead">
@@ -1871,7 +2241,7 @@
             <p class="sub">등록된 차량과 학생 탑승 배정 현황을 관리합니다.</p>
           </div>
         </header>
-      
+
         <div class="bus-summary-grid">
           <div class="bus-summary-card total">
             <div class="bus-summary-label">
@@ -1883,7 +2253,7 @@
             </div>
             <p>등록된 전체 차량</p>
           </div>
-        
+
           <div class="bus-summary-card assigned">
             <div class="bus-summary-label">
               <span>배정된 학생</span>
@@ -1894,7 +2264,7 @@
             </div>
             <p>버스에 배정된 학생</p>
           </div>
-        
+
           <div class="bus-summary-card unassigned">
             <div class="bus-summary-label">
               <span>미배정 학생</span>
@@ -1906,6 +2276,7 @@
             <p>버스 배정이 필요한 학생</p>
           </div>
         </div>
+
         <div class="bus-list-heading">
           <div>
             <h2>버스별 학생 배정 현황</h2>
@@ -1915,24 +2286,114 @@
             전체 ${num(totalBuses)}대
           </span>
         </div>
-        <div class="tablewrap"><table><thead><tr><th>버스</th><th>차량번호</th><th>기사</th><th class="num">학생 수</th><th>탑승 예정 학생</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="5" class="empty">등록된 버스가 없습니다. 아래에서 버스를 등록하세요.</td></tr>'}</tbody></table></div>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>버스</th>
+                <th>차량번호</th>
+                <th>기사</th>
+                <th class="num">학생 수</th>
+                <th>탑승 예정 학생</th>
+                <th>관리</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || '<tr><td colspan="6" class="empty">등록된 버스가 없습니다. 아래에서 버스를 등록하세요.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+
         <section class="student-registration" aria-label="버스 등록 및 학생 배정">
           <details class="registration-toggle">
-            <summary>버스 등록 및 학생 배정 <span>클릭해서 펼치기</span></summary>
+            <summary>
+              버스 등록 및 학생 배정
+              <span>클릭해서 펼치기</span>
+            </summary>
             <div class="forms">
-          <form data-form="bus"><h2>버스 등록</h2>
-            <label>이름<input name="name" required placeholder="예: 1호차" maxlength="50"></label>
-            <label>차량번호<input name="plate_no" required placeholder="예: 12가3456" maxlength="30"></label>
-            <label>기사<select name="driver_id"><option value="">지정 안 함</option>${options(admins, (u) => u.id, (u) => u.name)}</select></label>
-            <button type="submit" class="btn primary">버스 등록</button></form>
-          <form data-form="assign"><h2>탑승 학생 배정</h2>
-            <label>버스<select name="bus_id" required><option value="">선택</option>${options(buses, (b) => b.id, (b) => `${b.name} ${b.plate_no}`)}</select></label>
-            <label>학생<select name="student_id" required><option value="">선택</option>${options(students, (s) => s.id, (s) => `${s.name}${s.class_name ? ` (${s.class_name})` : ''}`)}</select></label>
-            <button type="submit" class="btn primary">학생 배정</button></form>
-                </div>
-              </details>
-            </section>`,
+              <form data-form="bus">
+                <h2>버스 등록</h2>
+                <label>
+                  이름
+                  <input name="name" required placeholder="예: 1호차" maxlength="50">
+                </label>
+                <label>
+                  차량번호
+                  <input name="plate_no" required placeholder="예: 12가3456" maxlength="30">
+                </label>
+                <label>
+                  기사
+                  <select name="driver_id">
+                    <option value="">지정 안 함</option>
+                    ${options(admins, (u) => u.id, (u) => u.name)}
+                  </select>
+                </label>
+                <button type="submit" class="btn primary">버스 등록</button>
+                <button type="button" class="btn" data-act="bus-edit-cancel" hidden>수정 취소</button>
+              </form>
+
+              <form data-form="assign">
+                <h2>탑승 학생 배정</h2>
+                <label>
+                  버스
+                  <select name="bus_id" required>
+                    <option value="">선택</option>
+                    ${options(buses, (b) => b.id, (b) => `${b.name} ${b.plate_no}`)}
+                  </select>
+                </label>
+                <label>
+                  학생
+                  <select name="student_id" required>
+                    <option value="">먼저 버스를 선택하세요</option>
+                  </select>
+                </label>
+                <button type="submit" class="btn primary">학생 배정</button>
+              </form>
+            </div>
+          </details>
+        </section>
+      `,
+
+      // 버스를 고르면 그 버스에 아직 배정되지 않은 학생만 보여준다
+      after: () => {
+        const form = document.querySelector('form[data-form="assign"]');
+        if (!form) return;
+
+        const busSelect = form.querySelector('[name="bus_id"]');
+        const studentSelect = form.querySelector('[name="student_id"]');
+
+        const updateStudents = () => {
+          const busId = busSelect.value;
+          const taken = new Set(assignedByBus[busId] || []);
+
+          studentSelect.replaceChildren();
+
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = busId
+            ? '학생 선택'
+            : '먼저 버스를 선택하세요';
+
+          studentSelect.appendChild(placeholder);
+
+          if (!busId) return;
+
+          for (const student of studentOptions) {
+            if (taken.has(student.id)) continue;
+
+            const option = document.createElement('option');
+            option.value = String(student.id);
+            option.textContent = student.name +
+              (student.class_name ? ` (${student.class_name})` : '');
+
+            studentSelect.appendChild(option);
+          }
+        };
+
+        busSelect.addEventListener('change', updateStudents);
+        updateStudents();
+      }
     };
   }
 
@@ -1971,7 +2432,29 @@
       return '보호자를 연결했습니다';
     },
     async bus(f) {
-      await api('/web/buses', { method: 'POST', body: { name: f.name, plate_no: f.plate_no, driver_id: f.driver_id ? Number(f.driver_id) : null } });
+      const busId = window.editingBusId;
+
+      const body = {
+        name: f.name,
+        plate_no: f.plate_no,
+        driver_id: f.driver_id ? Number(f.driver_id) : null
+      };
+
+      if (busId) {
+        await api(`/web/buses/${busId}`, {
+          method: 'PUT',
+          body
+        });
+
+        window.editingBusId = null;
+        return '버스 정보를 수정했습니다';
+      }
+
+      await api('/web/buses', {
+        method: 'POST',
+        body
+      });
+
       return '버스를 등록했습니다';
     },
     async assign(f) {
@@ -2053,6 +2536,41 @@
     }
   });
 
+  // 학생 명부 선택 상태 갱신
+  function updateRosterSelection() {
+    const checkboxes = [
+      ...document.querySelectorAll('input[data-sel]')
+    ];
+
+    const selectedCount = checkboxes.filter(
+      (checkbox) => checkbox.checked
+    ).length;
+
+    const deleteButton = document.querySelector(
+      '[data-act="roster-del-sel"]'
+    );
+
+    const selectAll = document.querySelector(
+      '[data-act="roster-selall"]'
+    );
+
+    if (deleteButton) {
+      deleteButton.disabled = selectedCount === 0;
+      deleteButton.textContent =
+        `선택한 학생 ${selectedCount}명 삭제`;
+    }
+
+    if (selectAll) {
+      selectAll.checked =
+        checkboxes.length > 0 &&
+        selectedCount === checkboxes.length;
+
+      selectAll.indeterminate =
+        selectedCount > 0 &&
+        selectedCount < checkboxes.length;
+    }
+  }
+
   // ---------- 클릭 / 선택 위임 ----------
   document.addEventListener('click', async (e) => {
     // 대시보드 운행 카드 클릭 시 운행 유형 전달
@@ -2079,7 +2597,32 @@
     const el = e.target.closest('[data-act], [data-dash-sim]');
     if (!el) return;
     const act = el.dataset.dashSim !== undefined ? 'dash-sim' : el.dataset.act;
-    if (act === 'period') {
+    if (act === 'parent-location-view') {
+      const select = $('#parent-location-user');
+      const userId = Number(select && select.value);
+      if (!Number.isInteger(userId) || userId < 1) {
+        toast('보호자 계정을 선택하세요.', 'error');
+        return;
+      }
+      const result = $('#parent-location-result');
+      result.hidden = false;
+      result.setAttribute('aria-busy', 'true');
+      result.textContent = '주소를 조회하고 있습니다.';
+      el.disabled = true;
+      try {
+        const location = await api(`/web/users/${encodeURIComponent(userId)}/location`);
+        if ($('#parent-location-user')?.value === String(userId)) renderParentLocation(location);
+      } catch (err) {
+        if (err.message !== 'unauthorized' && $('#parent-location-user')?.value === String(userId)) {
+          result.textContent = err.message.includes('(404)')
+            ? '주소 정보를 찾을 수 없습니다. 대상이 보호자 계정인지 확인하세요.'
+            : '주소 조회에 실패했습니다. 잠시 후 다시 시도하세요.';
+        }
+      } finally {
+        result.removeAttribute('aria-busy');
+        el.disabled = false;
+      }
+    } else if (act === 'period') {
       dashPeriod = el.dataset.value;
       route();
     } else if (act === 'dash-sim') {
@@ -2113,7 +2656,11 @@
     else if (act === 'roster-edit') { rosterState.edit = Number(el.dataset.id); route(); }
     else if (act === 'roster-cancel') { rosterState.edit = null; route(); }
     else if (act === 'roster-selall') {
-      document.querySelectorAll('input[data-sel]').forEach((c) => { c.checked = el.checked; });
+      document.querySelectorAll('input[data-sel]').forEach((c) => {
+        c.checked = el.checked;
+      });
+
+      updateRosterSelection();
     } else if (act === 'roster-del' || act === 'roster-del-sel' || act === 'roster-del-class') {
       let body, msg;
       if (act === 'roster-del') {
@@ -2136,10 +2683,103 @@
         rosterState.edit = null;
         await route();
       } catch (err) { if (err.message !== 'unauthorized') toast(err.message, 'error'); el.disabled = false; }
+    } else if (act === 'bus-edit-cancel') {
+      window.editingBusId = null;
+
+      const form = document.querySelector('form[data-form="bus"]');
+      if (!form) return;
+
+      form.reset();
+
+      const title = form.querySelector('h2');
+      const submitButton = form.querySelector('button[type="submit"]');
+      const cancelButton = form.querySelector('[data-act="bus-edit-cancel"]');
+
+      if (title) title.textContent = '버스 등록';
+      if (submitButton) submitButton.textContent = '버스 등록';
+      if (cancelButton) cancelButton.hidden = true;
+    } else if (act === 'bus-edit') {
+      const busId = Number(el.dataset.busId);
+      const bus = window.busEditData?.find((b) => Number(b.id) === busId);
+
+      if (!bus) {
+        toast('버스 정보를 찾을 수 없습니다', 'error');
+        return;
+      }
+
+      window.editingBusId = busId;
+
+      const form = document.querySelector('form[data-form="bus"]');
+
+      if (!form) {
+        toast('버스 등록 폼을 찾을 수 없습니다', 'error');
+        return;
+      }
+
+      form.closest('details')?.setAttribute('open', '');
+
+      form.elements.name.value = bus.name || '';
+      form.elements.plate_no.value = bus.plate_no || '';
+      form.elements.driver_id.value = bus.driver_id ?? '';
+
+      const title = form.querySelector('h2');
+      const submitButton = form.querySelector('button[type="submit"]');
+
+      if (title) title.textContent = '버스 정보 수정';
+      if (submitButton) submitButton.textContent = '수정 저장';
+
+      const cancelButton = form.querySelector('[data-act="bus-edit-cancel"]');
+      if (cancelButton) cancelButton.hidden = false;
+
+      form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (act === 'bus-unassign') {
+      const busId = Number(el.dataset.busId);
+      const studentId = Number(el.dataset.studentId);
+      const studentName = el.dataset.studentName || '선택한 학생';
+
+      if (!Number.isSafeInteger(busId) || busId <= 0 ||
+          !Number.isSafeInteger(studentId) || studentId <= 0) {
+        toast('배정 정보가 올바르지 않습니다', 'error');
+        return;
+      }
+
+      if (!window.confirm(`${studentName} 학생의 버스 배정을 해제할까요?`)) return;
+
+      el.disabled = true;
+
+      try {
+        await api(`/web/buses/${busId}/students/${studentId}`, {
+          method: 'DELETE'
+        });
+
+        toast(`${studentName} 학생의 버스 배정을 해제했습니다`);
+        await route();
+      } catch (err) {
+        if (err.message !== 'unauthorized') {
+          toast(err.message, 'error');
+        }
+        el.disabled = false;
+      }
     }
   });
 
   document.addEventListener('change', (e) => {
+    // admin-web: 학생 명부 체크박스 선택 상태 갱신
+    if (e.target.matches('input[data-sel]')) {
+      updateRosterSelection();
+      return;
+    }
+
+    // main: 보호자를 바꾸면 이전 주소 조회 결과를 지움
+    if (e.target.id === 'parent-location-user') {
+      const result = $('#parent-location-result');
+      if (result) {
+        result.hidden = true;
+        result.replaceChildren();
+      }
+      return;
+    }
+
     const k = e.target.dataset && e.target.dataset.filter;
     if (!k) return;
     if (k === 'trips-result') { tripsState.result = e.target.value; tripsState.offset = 0; }
@@ -2210,27 +2850,59 @@
 
   async function refreshBadge() {
     try {
-      const r = await api('/alerts?status=OPEN&limit=1');
+      const [open, acked] = await Promise.all([
+        api('/alerts?status=OPEN&limit=1&simulation_mode=false'),
+        api('/alerts?status=ACKED&limit=1&simulation_mode=false')
+      ]);
+
+      const unresolvedTotal =
+        (Number(open.total) || 0) +
+        (Number(acked.total) || 0);
+
       const el = $('#nav-alert-count');
-      el.textContent = r.total;
-      el.hidden = r.total === 0;
-      document.title = (r.total ? `(${r.total}) ` : '') + '통학버스 안전관리';
-    } catch { /* 배지는 실패해도 화면 사용에 지장 없음 */ }
+
+      el.textContent = unresolvedTotal;
+      el.hidden = unresolvedTotal === 0;
+
+      document.title =
+        (unresolvedTotal ? `(${unresolvedTotal}) ` : '') +
+        '통학버스 안전관리';
+
+    } catch {
+      /* 배지 조회 실패 시 다른 화면 기능은 유지 */
+    }
+
     try {
       const q = await api('/web/child-requests?status=PENDING&limit=1');
+
       const rel = $('#nav-request-count');
+
       rel.textContent = q.total;
       rel.hidden = q.total === 0;
-    } catch { /* 무시 */ }
+
+    } catch {
+      /* 연결 요청 배지 조회 실패는 무시 */
+    }
   }
 
   function userIsTyping() {
     const a = document.activeElement;
     return a && $('#view').contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && (a.value || '').length > 0;
   }
-  function softRefresh() {                       // 입력 중인 내용이 지워지지 않게 건너뜀
+  function softRefresh() {
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => { if (!userIsTyping()) route(); }, 300);
+
+    const tryRefresh = () => {
+      if (userIsTyping()) {
+        refreshTimer = setTimeout(tryRefresh, 1000);
+        return;
+      }
+
+      refreshTimer = null;
+      route();
+    };
+
+    refreshTimer = setTimeout(tryRefresh, 300);
   }
 
   function onAlert(a) {

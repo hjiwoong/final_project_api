@@ -50,7 +50,9 @@ def get_current_user(
     if user is None:
         raise HTTPException(401, "존재하지 않는 사용자입니다")
     if user.deletion_requested_at is not None:
+
         raise HTTPException(403, "계정 삭제 유예 중입니다")
+
     return user
 
 

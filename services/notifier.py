@@ -3,6 +3,8 @@
 수신자
 - 관리자(ADMIN) 전체
 - 학부모: URGENT(미하차 의심)일 때만, 해당 버스 탑승 예정(오늘 결석 제외) 학생의 보호자
+- URGENT 경고는 응답 후 send_alert_pushes 가 수신자의 모든 기기(push_tokens)로 FCM 푸시 발송
+  (실패해도 알림 기록은 유지, 만료된 토큰은 자동 삭제)
 LLM 요약은 services/llm_service.py, Agent 판단은 services/agent_service.py
 """
 import logging
@@ -49,6 +51,7 @@ def raise_alert(
         a.event_id, a.level, a.message, a.llm_summary = event.id, level, message, summary
         db.flush()
         if escalated:
+            # 긴급으로 올라가면 아직 알림을 못 받은 보호자에게 알림 추가 (관리자 중복 없음)
             _notify(db, a, trip, level)
         return a
 
