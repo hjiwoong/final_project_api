@@ -29,8 +29,10 @@ services/rag_service.py — 하차 확인 의무·대응 수칙 RAG  (AI ③)
 import hashlib
 import json
 import logging
+import math
 import os
 import re
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -313,9 +315,44 @@ def _load_index_file() -> dict:
         data = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return empty
-    if data.get("model") != empty["model"] or data.get("dim") != empty["dim"] or "vecs" not in data:
+    if (
+        not isinstance(data, dict)
+        or data.get("model") != empty["model"]
+        or data.get("dim") != empty["dim"]
+        or not isinstance(data.get("vecs"), dict)
+    ):
         return empty                       # 모델·차원이 바뀌면 처음부터
     return data
+
+
+def _valid_vector(value) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == gemini_client.EMBED_DIM
+        and all(isinstance(item, (int, float)) and math.isfinite(item) for item in value)
+    )
+
+
+def _write_index_file(index: dict) -> None:
+    INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=INDEX_FILE.parent,
+            prefix=f".{INDEX_FILE.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            json.dump(index, temp_file, ensure_ascii=False)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        os.replace(temp_path, INDEX_FILE)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
 
 def _get_index() -> list[tuple[dict, list[float]]]:
@@ -325,29 +362,63 @@ def _get_index() -> list[tuple[dict, list[float]]]:
         raise RuntimeError(f"'{KNOWLEDGE_DIR.name}/' 에 문서(.md/.txt/.pdf)가 없습니다.")
     if _index is None:
         _index = _load_index_file()
-    vecs = _index["vecs"]
+    vecs = {
+        key: vector
+        for key, vector in _index["vecs"].items()
+        if _valid_vector(vector)
+    }
     keys = [_chunk_key(c) for c in chunks]
-    missing = [(k, c) for k, c in zip(keys, chunks) if k not in vecs]
+    missing = [(key, chunk) for key, chunk in zip(keys, chunks) if key not in vecs]
     if missing:
         log.info("📚 [RAG] 새 문서 조각 %d개를 임베딩합니다 (전체 %d개)...", len(missing), len(chunks))
-        new_vecs = gemini_client.embed(
-            [c["text"] for _, c in missing], kind="document",
-            titles=[_display_title(c) for _, c in missing],
-        )
-        for (k, _), v in zip(missing, new_vecs):
-            vecs[k] = v
-        live = set(keys)                     # 지운 문서의 벡터는 정리
-        _index["vecs"] = {k: v for k, v in vecs.items() if k in live}
+        generated: dict[str, list[float]] = {}
+        batch_size = 10
+        for start in range(0, len(missing), batch_size):
+            batch = missing[start : start + batch_size]
+            vectors = gemini_client.embed(
+                [chunk["text"] for _, chunk in batch],
+                kind="document",
+                titles=[_display_title(chunk) for _, chunk in batch],
+            )
+            if len(vectors) != len(batch):
+                raise RuntimeError(
+                    f"RAG 임베딩 수 불일치: 요청 {len(batch)}개, 응답 {len(vectors)}개"
+                )
+            for (key, _), vector in zip(batch, vectors):
+                if not _valid_vector(vector):
+                    raise RuntimeError(f"RAG 임베딩 벡터가 올바르지 않습니다: {key}")
+                generated[key] = vector
+
+        live = set(keys)
+        updated_index = {
+            **_index,
+            "vecs": {
+                key: vector
+                for key, vector in {**vecs, **generated}.items()
+                if key in live
+            },
+        }
         try:
-            INDEX_FILE.write_text(json.dumps(_index, ensure_ascii=False), encoding="utf-8")
+            _write_index_file(updated_index)
         except OSError:
             log.warning("RAG 인덱스 캐시 저장 실패 (메모리에서만 사용)")
-    return [(c, _index["vecs"][k]) for k, c in zip(keys, chunks)]
+        _index = updated_index
+    else:
+        _index = {**_index, "vecs": vecs}
+    indexed_chunks = []
+    for key, chunk in zip(keys, chunks):
+        vector = _index["vecs"].get(key)
+        if vector is None:
+            raise RuntimeError(f"RAG 임베딩 인덱스에서 벡터를 찾을 수 없습니다: {key}")
+        indexed_chunks.append((chunk, vector))
+    return indexed_chunks
 
 
 def _real_search(query: str, k: int) -> list[dict]:
     index = _get_index()
     qv = gemini_client.embed([query], kind="query")[0]
+    if not _valid_vector(qv):
+        raise RuntimeError("질문 임베딩 벡터가 올바르지 않습니다")
     scored = sorted(
         ((sum(a * b for a, b in zip(qv, v)), c) for c, v in index),
         key=lambda x: x[0], reverse=True,

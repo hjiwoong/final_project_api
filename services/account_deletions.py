@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 
 from database.db_connection import SessionLocal
-from models.models import ChildRequest, Guardian, Notification, SocialAccount, User, UserRole
 
 ACCOUNT_DELETION_GRACE_DAYS = 30
 

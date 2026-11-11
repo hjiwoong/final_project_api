@@ -9,6 +9,35 @@ from models.models import Bus, BusStudent, Guardian, Trip, TripStatus, User
 router = APIRouter(prefix="/me", tags=["학부모-버스운행"])
 
 
+@router.get("/buses")
+def get_parent_buses(
+    me: User = Depends(require_parent),
+    db: Session = Depends(get_db),
+):
+    buses = (
+        db.query(Bus)
+        .join(BusStudent, BusStudent.bus_id == Bus.id)
+        .join(Guardian, Guardian.student_id == BusStudent.student_id)
+        .filter(Guardian.user_id == me.id)
+        .distinct()
+        .order_by(Bus.id)
+        .all()
+    )
+    return [
+        {
+            "id": bus.id,
+            "name": bus.name,
+            "plate_no": bus.plate_no,
+            "student_count": (
+                db.query(BusStudent)
+                .filter(BusStudent.bus_id == bus.id)
+                .count()
+            ),
+        }
+        for bus in buses
+    ]
+
+
 @router.get("/bus-status")
 def get_parent_bus_status(
     me: User = Depends(require_parent),
