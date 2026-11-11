@@ -81,10 +81,6 @@ class User(Base):
         String(20), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
     )
     push_token = Column(String(512), nullable=True)
-    # 주소·좌표는 Fernet 암호문으로 저장 (services/location_crypto.py)
-    address_encrypted = Column(String(1024), nullable=True)
-    latitude_encrypted = Column(String(255), nullable=True)
-    longitude_encrypted = Column(String(255), nullable=True)
     deletion_requested_at = Column(DateTime, nullable=True, index=True)   # 계정 삭제 유예 시작 시각
     created_at = Column(DateTime, default=datetime.now)
 
@@ -100,6 +96,10 @@ class Student(Base):
     name = Column(String(100), nullable=False)
     class_name = Column(String(50), nullable=True)      # 예: 1-2
     consent_at = Column(DateTime, nullable=True)        # 보호자 동의 시각
+    # 자녀 승하차 주소·좌표는 Fernet 암호문으로 저장 (services/location_crypto.py)
+    address_encrypted = Column(String(1024), nullable=True)
+    latitude_encrypted = Column(String(255), nullable=True)
+    longitude_encrypted = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     guardians = relationship("Guardian", back_populates="student")

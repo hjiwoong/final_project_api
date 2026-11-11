@@ -4,17 +4,17 @@ from fastapi import (
     APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile,
 )
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.security import require_admin
 from database.db_connection import get_db
 from models.models import (
     Alert, AlertStatus,
-    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod, Guardian,
+    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod,
     EventType, EventImage, Student, Trip, TripResult, TripStatus, User,
 )
-from services.location_crypto import decrypt_coordinate_value, decrypt_location_value
+from routers.location import student_location
 from services import agent_service, event_bus, llm_service, notifier, storage
 from services.detector import detect_people, low_conf_count
 from services.judge import judge
@@ -34,6 +34,10 @@ class ConfirmBody(BaseModel):
     method: ConfirmMethod = ConfirmMethod.BUTTON
     safety_checked: bool = False
     simulation_mode: bool = False
+    note: str | None = Field(
+        default=None, max_length=500,
+        validation_alias=AliasChoices("note", "reason"),   # 앱은 reason 으로 전송
+    )   # 미하차 의심 경고 해결 사유
 
 
 # ---------- helpers ----------
@@ -239,27 +243,6 @@ def trip_boarding_map(
         )
         .all()
     }
-    guardian_rows = (
-        db.query(Guardian.student_id, User)
-        .join(User, User.id == Guardian.user_id)
-        .filter(Guardian.student_id.in_(student_ids))
-        .order_by(Guardian.id)
-        .all()
-    )
-    locations_by_student: dict[int, list[dict]] = {
-        student_id: [] for student_id in student_ids
-    }
-    for student_id, guardian in guardian_rows:
-        if guardian.latitude_encrypted is None or guardian.longitude_encrypted is None:
-            continue
-        location = {
-            "latitude": decrypt_coordinate_value(guardian.latitude_encrypted),
-            "longitude": decrypt_coordinate_value(guardian.longitude_encrypted),
-        }
-        if guardian.address_encrypted is not None:
-            location["address"] = decrypt_location_value(guardian.address_encrypted)
-        locations_by_student[student_id].append(location)
-
     return {
         "trip_id": trip.id,
         "students": [
@@ -269,7 +252,7 @@ def trip_boarding_map(
                 "class_name": student.class_name,
                 "is_absent": student.id in absences,
                 "bus_name": trip.bus.name if trip.bus else None,
-                "guardian_locations": locations_by_student[student.id],
+                "location": student_location(student),
             }
             for student in students
         ],
@@ -481,36 +464,24 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
             detail="승차 사진과 종점 사진이 모두 등록되어야 운행을 종료할 수 있습니다."
         )
 
-    if t.result == TripResult.OK:
-        t.status = TripStatus.CLOSED
-        t.confirm_method = body.method
-        t.ended_at = datetime.now()
-
-        db.commit()
-
-        return {
-            "id": t.id,
-            "status": t.status.value,
-            "result": t.result.value,
-            "confirm_method": t.confirm_method.value,
-            "ended_at": t.ended_at,
-        }
-
+    resolved_alerts: list[Alert] = []
     if t.result != TripResult.OK:
-        unresolved_alert = (
-            db.query(Alert)
-            .filter(
-                Alert.trip_id == trip_id,
-                Alert.status != AlertStatus.RESOLVED
-            )
-            .first()
-        )
-
-        if unresolved_alert:
-            raise HTTPException(
-                status_code=409,
-                detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다."
-            )
+        unresolved = notifier.open_alerts(db, trip_id)
+        if unresolved:
+            note = (body.note or "").strip()
+            if not note:
+                raise HTTPException(
+                    status_code=409,
+                    detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다. 미하차 확인 사유를 함께 입력하세요."
+                )
+            # 안전 확인(또는 시뮬레이션)은 위에서 이미 검증했으므로 사유와 함께 경고를 해결 처리
+            now = datetime.now()
+            for a in unresolved:
+                a.status = AlertStatus.RESOLVED
+                a.note = note
+                a.acked_at = a.acked_at or now
+                a.resolved_at = now
+            resolved_alerts = unresolved
 
     # 결과가 OK 이거나, 미하차 의심 경고가 모두 해결된 경우 종료 허용
     # (이전 코드는 이 부분이 if 안에 있어서 결과가 OK 인 정상 운행이 종료되지 않았음)
@@ -519,6 +490,9 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
     # 시뮬레이션 여부는 운행 시작 시 결정하며 종료 시 변경하지 않는다.
     t.ended_at = datetime.now()
     db.commit()
+    for a in resolved_alerts:
+        db.refresh(a)
+        event_bus.publish("alert", alert_to_dict(a))
 
     return {
         "id": t.id,

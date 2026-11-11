@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.security import require_admin, require_parent
 from database.db_connection import get_db
+from routers.location import student_location
 from models.models import (
     Attendance, Bus, BusStudent, Guardian, Student, Trip, TripStatus, User,
 )
@@ -129,6 +130,7 @@ def my_children(
 
         children.append({
             **student_to_dict(student),
+            "location": student_location(student),
             "is_absent": absent_by_student.get(student.id, False),
             "bus_id": bus["id"] if bus else None,
             "bus_name": bus["name"] if bus else None,
