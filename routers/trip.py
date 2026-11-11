@@ -12,13 +12,14 @@ from database.db_connection import get_db
 from models.models import (
     Alert, AlertStatus,
     Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod, Guardian,
-    EventType, Student, Trip, TripResult, TripStatus, User,
+    EventType, EventImage, Student, Trip, TripResult, TripStatus, User,
 )
 from services.location_crypto import decrypt_coordinate_value, decrypt_location_value
 from services import agent_service, event_bus, llm_service, notifier, storage
 from services.detector import detect_people, low_conf_count
 from services.judge import judge
 from services.serializers import alert_to_dict, event_to_dict, trip_to_dict
+
 
 # 운행 API 는 관리자(기사) 앱 전용
 router = APIRouter(prefix="/trips", tags=["운행"], dependencies=[Depends(require_admin)])
@@ -57,12 +58,20 @@ def expected_students(db: Session, bus_id: int) -> int:
     return len(ids) - absent
 
 
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+
 async def read_image(image: UploadFile) -> bytes:
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(400, "이미지 파일만 업로드할 수 있습니다")
-    data = await image.read()
+
+    data = await image.read(MAX_IMAGE_SIZE + 1)
+
     if not data:
         raise HTTPException(400, "빈 파일입니다")
+
+    if len(data) > MAX_IMAGE_SIZE:
+        raise HTTPException(413, "이미지는 최대 5MB까지 업로드할 수 있습니다")
+
     return data
 
 
@@ -299,8 +308,17 @@ async def boarding_photo(
         captured_at=captured_at, uploaded_at=received, image_expires_at=storage.expires_at(),
     )
     db.add(ev)
-    t.boarding_count = boarding_count          # 재촬영이면 마지막 값으로 갱신
+    db.flush()  # 이벤트 ID 확보 (아직 DB에 최종 저장 전)
+
+    db.add(EventImage(
+        event_id=ev.id,
+        image_data=data,
+        content_type=image.content_type or "image/jpeg",
+    ))
+
+    t.boarding_count = boarding_count
     db.commit()
+
     db.refresh(ev)
     event_bus.publish("event", event_to_dict(ev))
     return {
@@ -351,7 +369,15 @@ async def dropoff_photo(
     db.add(ev)
     db.flush()
 
+    # 하차 사진을 공통 MySQL에 저장
+    db.add(EventImage(
+        event_id=ev.id,
+        image_data=data,
+        content_type=image.content_type or "image/jpeg",
+    ))
+
     t.remaining_count = remaining
+
     t.alighted_count = verdict["alighted_count"]
     t.result = verdict["result"]
 
@@ -370,6 +396,14 @@ async def dropoff_photo(
         )
         db.add(mismatch)
         db.flush()
+
+        # 인원 불일치 사진도 공통 MySQL에 저장
+        db.add(EventImage(
+            event_id=mismatch.id,
+            image_data=data,
+            content_type=image.content_type or "image/jpeg",
+        ))
+
         alert = notifier.raise_alert(
             db, t, mismatch, verdict["level"], verdict["message"],
             boarding=t.boarding_count, remaining=remaining,

@@ -10,6 +10,8 @@ from database.db_connection import get_db
 from models.models import BoardingEvent, EventType
 from services import event_bus
 from services.serializers import event_to_dict, image_available
+from fastapi import Response
+from models.models import EventImage
 
 router = APIRouter(tags=["이벤트"])
 
@@ -53,12 +55,26 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
 
 @router.get("/events/{event_id}/image", dependencies=[Depends(require_admin_header_or_query)])
 def get_event_image(event_id: int, db: Session = Depends(get_db)):
-    """사진 파일. 보관기간이 지났거나 파일이 없으면 410
-    (<img src> 용으로 ?token=JWT 도 허용)"""
     e = get_event_or_404(db, event_id)
-    if not image_available(e) or not os.path.exists(e.image_path):
-        raise HTTPException(410, "보관 기간이 지나 사진이 삭제되었습니다")
-    return FileResponse(e.image_path)
+
+    # 사진 보관 기간 확인
+    if e.image_expires_at and datetime.now() >= e.image_expires_at:
+        raise HTTPException(410, "사진 보관 기간이 만료되었습니다.")
+
+    # 1. 공통 MySQL에서 사진 조회
+    saved_image = db.get(EventImage, event_id)
+
+    if saved_image:
+        return Response(
+            content=saved_image.image_data,
+            media_type=saved_image.content_type,
+        )
+
+    # 2. 기존 로컬 사진 조회
+    if e.image_path and os.path.exists(e.image_path):
+        return FileResponse(e.image_path)
+
+    raise HTTPException(410, "사진 파일을 찾을 수 없습니다.")
 
 
 @router.get("/stream/events", dependencies=[Depends(require_admin_header_or_query)])
