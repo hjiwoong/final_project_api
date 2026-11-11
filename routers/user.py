@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 
 from core.security import create_access_token, get_current_user, require_admin
 from database.db_connection import get_db
-from models.models import ChildRequest, PushToken, SocialAccount, User, UserRole
+from models.models import (
+    Bus, ChildRequest, Guardian, Notification, PushToken, SocialAccount, Trip, User, UserRole,
+)
 from services.account_deletions import ACCOUNT_DELETION_GRACE_DAYS
 from services.child_requests import (
     MAX_CHILDREN_AT_SIGNUP, ChildInput, dedupe, make_requests, parent_request_dict,
@@ -441,3 +443,41 @@ def list_users(role: UserRole | None = None, db: Session = Depends(get_db)):
     if role:
         q = q.filter(User.role == role)
     return [user_to_dict(u) for u in q.all()]
+
+
+@router.delete("/web/users/{user_id}", dependencies=[Depends(require_admin)])
+def delete_parent_user(user_id: int, db: Session = Depends(get_db)):
+    """관리자 웹: 아무 기록에도 연결되지 않은 보호자 계정만 즉시 삭제한다.
+    (학생 연결·자녀 요청·알림 기록이 있으면 409. 학부모 본인 탈퇴는 /me/account-deletion 의 30일 유예를 사용)"""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "계정을 찾을 수 없습니다")
+    if user.role != UserRole.PARENT:
+        raise HTTPException(403, "관리자 계정은 삭제할 수 없습니다")
+
+    if db.query(Bus).filter(Bus.driver_id == user_id).first():
+        raise HTTPException(409, "버스 담당자로 등록된 계정입니다")
+    if db.query(Trip).filter(Trip.driver_id == user_id).first():
+        raise HTTPException(409, "운행 기록이 연결된 계정입니다")
+    if db.query(Guardian).filter(Guardian.user_id == user_id).first():
+        raise HTTPException(409, "학생과 연결된 보호자 계정입니다")
+    if db.query(ChildRequest).filter(ChildRequest.user_id == user_id).first():
+        raise HTTPException(409, "자녀 연결 요청 기록이 남아 있습니다")
+    if db.query(Notification).filter(Notification.user_id == user_id).first():
+        raise HTTPException(409, "알림 기록이 연결된 계정입니다")
+
+    try:
+        # 구글 로그인 연결과 기기별 푸시 토큰도 함께 삭제
+        db.query(SocialAccount).filter(SocialAccount.user_id == user_id).delete(
+            synchronize_session=False
+        )
+        db.query(PushToken).filter(PushToken.user_id == user_id).delete(
+            synchronize_session=False
+        )
+        db.delete(user)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "다른 기록과 연결되어 있어 삭제할 수 없습니다")
+
+    return {"message": "보호자 계정 삭제 완료", "user_id": user_id}

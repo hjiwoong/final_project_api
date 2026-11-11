@@ -147,3 +147,15 @@ def reject_child_request(
     db.commit()
     db.refresh(r)
     return admin_request_dict(r)
+
+@router.delete("/web/child-requests", dependencies=[Depends(require_admin)])
+def delete_all_child_requests(db: Session = Depends(get_db)):
+    deleted_count = db.query(ChildRequest).delete(
+        synchronize_session=False
+    )
+    db.commit()
+
+    return {
+        "message": "연결 요청 기록 전체 삭제 완료",
+        "deleted_count": deleted_count,
+    }

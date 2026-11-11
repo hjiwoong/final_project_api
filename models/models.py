@@ -15,6 +15,7 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import relationship
 
 from database.orm import Base
+from sqlalchemy.dialects.mysql import MEDIUMBLOB
 
 # KPI(업로드→알림 지연)를 ms 단위로 재기 위한 마이크로초 정밀 시각
 # (MySQL 기본 DATETIME 은 초 단위라 DATETIME(6) 사용)
@@ -294,3 +295,17 @@ class PushToken(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     token = Column(String(512), nullable=False, unique=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+from sqlalchemy import LargeBinary
+
+class EventImage(Base):
+    __tablename__ = "event_images"
+
+    event_id = Column(
+        Integer,
+        ForeignKey("boarding_events.id", ondelete="CASCADE"),
+        primary_key=True
+    )
+
+    image_data = Column(MEDIUMBLOB, nullable=False)
+    content_type = Column(String(100), nullable=False, default="image/jpeg")

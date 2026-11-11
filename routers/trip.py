@@ -11,14 +11,15 @@ from core.security import require_admin
 from database.db_connection import get_db
 from models.models import (
     Alert, AlertStatus,
-    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod, Guardian,
-    EventType, Student, Trip, TripResult, TripStatus, User,
+    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod,
+    EventType, EventImage, Student, Trip, TripResult, TripStatus, User,
 )
 from routers.location import student_location
 from services import agent_service, event_bus, llm_service, notifier, storage
 from services.detector import detect_people, low_conf_count
 from services.judge import judge
 from services.serializers import alert_to_dict, event_to_dict, trip_to_dict
+
 
 # 운행 API 는 관리자(기사) 앱 전용
 router = APIRouter(prefix="/trips", tags=["운행"], dependencies=[Depends(require_admin)])
@@ -61,12 +62,20 @@ def expected_students(db: Session, bus_id: int) -> int:
     return len(ids) - absent
 
 
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+
 async def read_image(image: UploadFile) -> bytes:
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(400, "이미지 파일만 업로드할 수 있습니다")
-    data = await image.read()
+
+    data = await image.read(MAX_IMAGE_SIZE + 1)
+
     if not data:
         raise HTTPException(400, "빈 파일입니다")
+
+    if len(data) > MAX_IMAGE_SIZE:
+        raise HTTPException(413, "이미지는 최대 5MB까지 업로드할 수 있습니다")
+
     return data
 
 
@@ -130,6 +139,8 @@ def list_trips(
     status: TripStatus | None = None,
     result: TripResult | None = None,
     bus_id: int | None = None,
+    driver_id: int | None = None,
+    search: str | None = None,
     simulation_mode: bool | None = None,
     from_: datetime | None = Query(None, alias="from"),
     to: datetime | None = None,
@@ -138,6 +149,17 @@ def list_trips(
     db: Session = Depends(get_db),
 ):
     q = db.query(Trip)
+    if search and search.strip():
+        keyword = f"%{search.strip()}%"
+        q = (
+            q.join(Trip.bus)
+            .outerjoin(User, Trip.driver_id == User.id)
+            .filter(
+                (Bus.name.ilike(keyword)) |
+                (Bus.plate_no.ilike(keyword)) |
+                (User.name.ilike(keyword))
+            )
+        )
     if simulation_mode is not None:
         q = q.filter(Trip.simulation_mode == simulation_mode)
     if status:
@@ -146,6 +168,8 @@ def list_trips(
         q = q.filter(Trip.result == result)
     if bus_id:
         q = q.filter(Trip.bus_id == bus_id)
+    if driver_id is not None:
+        q = q.filter(Trip.driver_id == driver_id)
     if from_:
         q = q.filter(Trip.started_at >= from_)
     if to:
@@ -267,8 +291,17 @@ async def boarding_photo(
         captured_at=captured_at, uploaded_at=received, image_expires_at=storage.expires_at(),
     )
     db.add(ev)
-    t.boarding_count = boarding_count          # 재촬영이면 마지막 값으로 갱신
+    db.flush()  # 이벤트 ID 확보 (아직 DB에 최종 저장 전)
+
+    db.add(EventImage(
+        event_id=ev.id,
+        image_data=data,
+        content_type=image.content_type or "image/jpeg",
+    ))
+
+    t.boarding_count = boarding_count
     db.commit()
+
     db.refresh(ev)
     event_bus.publish("event", event_to_dict(ev))
     return {
@@ -319,7 +352,15 @@ async def dropoff_photo(
     db.add(ev)
     db.flush()
 
+    # 하차 사진을 공통 MySQL에 저장
+    db.add(EventImage(
+        event_id=ev.id,
+        image_data=data,
+        content_type=image.content_type or "image/jpeg",
+    ))
+
     t.remaining_count = remaining
+
     t.alighted_count = verdict["alighted_count"]
     t.result = verdict["result"]
 
@@ -338,6 +379,14 @@ async def dropoff_photo(
         )
         db.add(mismatch)
         db.flush()
+
+        # 인원 불일치 사진도 공통 MySQL에 저장
+        db.add(EventImage(
+            event_id=mismatch.id,
+            image_data=data,
+            content_type=image.content_type or "image/jpeg",
+        ))
+
         alert = notifier.raise_alert(
             db, t, mismatch, verdict["level"], verdict["message"],
             boarding=t.boarding_count, remaining=remaining,
