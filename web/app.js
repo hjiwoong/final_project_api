@@ -2084,13 +2084,13 @@
     </details>
   </section>
   <section class="parent-location-panel" aria-labelledby="parent-location-heading">
-    <h2 id="parent-location-heading">보호자 주소 확인</h2>
-    <p class="muted-text">선택한 보호자의 저장된 주소와 좌표를 조회합니다. 이 정보는 이 화면에서만 표시됩니다.</p>
+    <h2 id="parent-location-heading">자녀 주소 확인</h2>
+    <p class="muted-text">선택한 학생의 저장된 승하차 주소와 좌표를 조회합니다. 이 정보는 이 화면에서만 표시됩니다.</p>
     <div class="parent-location-controls">
-      <label for="parent-location-user">보호자 계정
+      <label for="parent-location-user">학생
         <select id="parent-location-user">
-          <option value="">보호자를 선택하세요</option>
-          ${options(parents, (u) => u.id, (u) => `${u.name} ${u.email}`)}
+          <option value="">학생을 선택하세요</option>
+          ${options(allStudents, (s) => s.id, (s) => `${s.name}${s.class_name ? ` (${s.class_name})` : ''}`)}
         </select>
       </label>
       <button type="button" class="btn" data-act="parent-location-view">주소 조회</button>
@@ -2601,7 +2601,7 @@
       const select = $('#parent-location-user');
       const userId = Number(select && select.value);
       if (!Number.isInteger(userId) || userId < 1) {
-        toast('보호자 계정을 선택하세요.', 'error');
+        toast('학생을 선택하세요.', 'error');
         return;
       }
       const result = $('#parent-location-result');
@@ -2610,12 +2610,12 @@
       result.textContent = '주소를 조회하고 있습니다.';
       el.disabled = true;
       try {
-        const location = await api(`/web/users/${encodeURIComponent(userId)}/location`);
+        const location = await api(`/web/students/${encodeURIComponent(userId)}/location`);
         if ($('#parent-location-user')?.value === String(userId)) renderParentLocation(location);
       } catch (err) {
         if (err.message !== 'unauthorized' && $('#parent-location-user')?.value === String(userId)) {
           result.textContent = err.message.includes('(404)')
-            ? '주소 정보를 찾을 수 없습니다. 대상이 보호자 계정인지 확인하세요.'
+            ? '주소 정보를 찾을 수 없습니다. 학생이 존재하는지 확인하세요.'
             : '주소 조회에 실패했습니다. 잠시 후 다시 시도하세요.';
         }
       } finally {
@@ -2770,7 +2770,7 @@
       return;
     }
 
-    // main: 보호자를 바꾸면 이전 주소 조회 결과를 지움
+    // main: 학생을 바꾸면 이전 주소 조회 결과를 지움
     if (e.target.id === 'parent-location-user') {
       const result = $('#parent-location-result');
       if (result) {
