@@ -19,7 +19,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MODE = os.getenv("DETECTOR_MODE", "real").lower()
 
 
-
 def _normalize_model_path(raw_path: str) -> str:
     p = Path(raw_path.strip())
     return str(p if p.is_absolute() else (BASE_DIR / p).resolve())
@@ -133,7 +132,6 @@ def open_image(image_bytes: bytes):
     return ImageOps.exif_transpose(img).convert("RGB")
 
 
-
 def _real_detect(image_bytes: bytes) -> list[dict]:
     models = load_model()
     img = open_image(image_bytes)
@@ -191,9 +189,9 @@ def detect_people(
     if MODE == "real":
         try:
             return _real_detect(image_bytes), "real"
-
         except Exception as e:  # noqa: BLE001
             log.exception("real 검출 실패 → mock-fallback: %s", e)
+            # 주의: 이 결과는 실제 사진을 본 게 아니다. 라우터(run_detector)에서 반드시 막아야 한다.
             return _mock_detect(default_count), "mock-fallback"
 
     count = mock_count if mock_count is not None else default_count

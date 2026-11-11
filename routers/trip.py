@@ -126,6 +126,8 @@ def list_trips(
     status: TripStatus | None = None,
     result: TripResult | None = None,
     bus_id: int | None = None,
+    driver_id: int | None = None,
+    search: str | None = None,
     simulation_mode: bool | None = None,
     from_: datetime | None = Query(None, alias="from"),
     to: datetime | None = None,
@@ -134,6 +136,17 @@ def list_trips(
     db: Session = Depends(get_db),
 ):
     q = db.query(Trip)
+    if search and search.strip():
+        keyword = f"%{search.strip()}%"
+        q = (
+            q.join(Trip.bus)
+            .outerjoin(User, Trip.driver_id == User.id)
+            .filter(
+                (Bus.name.ilike(keyword)) |
+                (Bus.plate_no.ilike(keyword)) |
+                (User.name.ilike(keyword))
+            )
+        )
     if simulation_mode is not None:
         q = q.filter(Trip.simulation_mode == simulation_mode)
     if status:
@@ -142,6 +155,8 @@ def list_trips(
         q = q.filter(Trip.result == result)
     if bus_id:
         q = q.filter(Trip.bus_id == bus_id)
+    if driver_id is not None:
+        q = q.filter(Trip.driver_id == driver_id)
     if from_:
         q = q.filter(Trip.started_at >= from_)
     if to:
@@ -431,6 +446,21 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
             status_code=409,
             detail="승차 사진과 종점 사진이 모두 등록되어야 운행을 종료할 수 있습니다."
         )
+
+    if t.result == TripResult.OK:
+        t.status = TripStatus.CLOSED
+        t.confirm_method = body.method
+        t.ended_at = datetime.now()
+
+        db.commit()
+
+        return {
+            "id": t.id,
+            "status": t.status.value,
+            "result": t.result.value,
+            "confirm_method": t.confirm_method.value,
+            "ended_at": t.ended_at,
+        }
 
     if t.result != TripResult.OK:
         unresolved_alert = (
