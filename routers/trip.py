@@ -361,10 +361,21 @@ async def dropoff_photo(
         )
 
     db.commit()
-    if alert and background_tasks is not None:
-        background_tasks.add_task(notifier.send_alert_pushes, alert.id)
-        # AI ② 템플릿 요약을 응답 후 LLM 요약으로 보강 (응답을 늦추지 않음)
-        background_tasks.add_task(llm_service.enrich_alert_summary, alert.id, verdict.get("brightness"))
+    if alert:
+        if background_tasks is not None:
+            background_tasks.add_task(notifier.send_alert_pushes, alert.id)
+            # AI ② 템플릿 요약을 응답 후 LLM 요약으로 보강 (응답을 늦추지 않음)
+            background_tasks.add_task(
+                llm_service.enrich_alert_summary,
+                alert.id,
+                verdict.get("brightness"),
+            )
+        else:
+            try:
+                notifier.send_alert_pushes(alert.id)
+            except Exception:
+                # background_tasks 가 없는 내부 호출에서도 푸시가 실패해도 응답은 유지한다.
+                pass
 
     # 실시간(SSE) 전송
     event_bus.publish("event", event_to_dict(ev))
