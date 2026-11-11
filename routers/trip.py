@@ -1,8 +1,9 @@
 from datetime import date, datetime
 
 from fastapi import (
-    APIRouter, Depends, File, Form, HTTPException, Query, UploadFile,
+    APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile,
 )
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -10,10 +11,11 @@ from core.security import require_admin
 from database.db_connection import get_db
 from models.models import (
     Alert, AlertStatus,
-    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod,
-    EventType, Trip, TripResult, TripStatus, User,
+    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod, Guardian,
+    EventType, Student, Trip, TripResult, TripStatus, User,
 )
-from services import event_bus, notifier, storage
+from services.location_crypto import decrypt_coordinate_value, decrypt_location_value
+from services import agent_service, event_bus, llm_service, notifier, storage
 from services.detector import detect_people, low_conf_count
 from services.judge import judge
 from services.serializers import alert_to_dict, event_to_dict, trip_to_dict
@@ -62,6 +64,20 @@ async def read_image(image: UploadFile) -> bytes:
     if not data:
         raise HTTPException(400, "빈 파일입니다")
     return data
+
+
+async def run_detector(data: bytes, mock_count, mock_low_conf, default_count: int):
+    """YOLO 추론은 CPU 를 오래 잡으므로 스레드에서 실행 (SSE 등 다른 요청이 멈추지 않게).
+    real 모드에서 모델이 실패하면 가짜 숫자로 판정하지 않고 재촬영/직접 확인을 요구한다."""
+    dets, mode = await run_in_threadpool(
+        detect_people, data, mock_count, mock_low_conf, default_count
+    )
+    if mode == "mock-fallback":
+        raise HTTPException(
+            503,
+            "AI 인원 검출에 실패했습니다. 다시 촬영하거나 차량 내부를 직접 확인해 주세요.",
+        )
+    return dets, mode
 
 
 # ---------- 운행 시작 / 조회 ----------
@@ -161,6 +177,96 @@ def get_trip(trip_id: int, db: Session = Depends(get_db)):
     }
 
 
+@router.delete("/{trip_id}", status_code=204)
+def cancel_trip(
+    trip_id: int,
+    me: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """사진 처리가 시작되기 전, 로그인한 기사의 빈 운행만 취소한다."""
+    trip = get_trip_or_404(db, trip_id)
+    if trip.driver_id != me.id:
+        raise HTTPException(404, "운행을 찾을 수 없습니다")
+    if trip.status != TripStatus.IN_PROGRESS:
+        raise HTTPException(409, "진행 중인 운행만 취소할 수 있습니다")
+    if trip.boarding_count is not None or trip.remaining_count is not None:
+        raise HTTPException(409, "사진 처리가 시작된 운행은 취소할 수 없습니다")
+    if trip.events or trip.alerts:
+        raise HTTPException(409, "이벤트가 기록된 운행은 취소할 수 없습니다")
+
+    db.delete(trip)
+    db.commit()
+
+
+@router.get("/{trip_id}/boarding-map")
+def trip_boarding_map(
+    trip_id: int,
+    me: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """로그인한 기사의 운행에 배정된 학생과 보호자의 지도 위치를 반환한다."""
+    trip = get_trip_or_404(db, trip_id)
+    if trip.driver_id != me.id:
+        raise HTTPException(404, "운행을 찾을 수 없습니다")
+
+    students = (
+        db.query(Student)
+        .join(BusStudent, BusStudent.student_id == Student.id)
+        .filter(BusStudent.bus_id == trip.bus_id)
+        .order_by(Student.id)
+        .all()
+    )
+    if not students:
+        return {"trip_id": trip.id, "students": []}
+
+    student_ids = [student.id for student in students]
+    absences = {
+        row[0]
+        for row in db.query(Attendance.student_id)
+        .filter(
+            Attendance.student_id.in_(student_ids),
+            Attendance.date == date.today(),
+            Attendance.is_absent.is_(True),
+        )
+        .all()
+    }
+    guardian_rows = (
+        db.query(Guardian.student_id, User)
+        .join(User, User.id == Guardian.user_id)
+        .filter(Guardian.student_id.in_(student_ids))
+        .order_by(Guardian.id)
+        .all()
+    )
+    locations_by_student: dict[int, list[dict]] = {
+        student_id: [] for student_id in student_ids
+    }
+    for student_id, guardian in guardian_rows:
+        if guardian.latitude_encrypted is None or guardian.longitude_encrypted is None:
+            continue
+        location = {
+            "latitude": decrypt_coordinate_value(guardian.latitude_encrypted),
+            "longitude": decrypt_coordinate_value(guardian.longitude_encrypted),
+        }
+        if guardian.address_encrypted is not None:
+            location["address"] = decrypt_location_value(guardian.address_encrypted)
+        locations_by_student[student_id].append(location)
+
+    return {
+        "trip_id": trip.id,
+        "students": [
+            {
+                "id": student.id,
+                "name": student.name,
+                "class_name": student.class_name,
+                "is_absent": student.id in absences,
+                "bus_name": trip.bus.name if trip.bus else None,
+                "guardian_locations": locations_by_student[student.id],
+            }
+            for student in students
+        ],
+    }
+
+
 # ---------- 승차 사진 ----------
 @router.post("/{trip_id}/boarding-photo")
 async def boarding_photo(
@@ -180,9 +286,10 @@ async def boarding_photo(
         raise HTTPException(409, "이미 종점 사진이 처리되어 승차 사진을 다시 올릴 수 없습니다")
 
     data = await read_image(image)
-    dets, mode = detect_people(data, mock_count, mock_low_conf, default_count=t.expected_count or 0)
+    dets, mode = await run_detector(data, mock_count, mock_low_conf, t.expected_count or 0)
     person_count = len(dets)
     boarding_count = max(person_count - exclude_count, 0)
+    photo = await run_in_threadpool(agent_service.photo_check, data)   # AI ④ 사진 밝기 점검
 
     ev = BoardingEvent(
         trip_id=t.id, event_type=EventType.BOARDING,
@@ -200,6 +307,7 @@ async def boarding_photo(
         "event_id": ev.id, "person_count": person_count,
         "boarding_count": boarding_count, "low_conf_count": ev.low_conf_count,
         "detector_mode": mode,
+        "photo_dark": photo["photo_dark"], "guidance": photo["guidance"],
     }
 
 
@@ -212,6 +320,7 @@ async def dropoff_photo(
     exclude_count: int = Form(0, ge=0),
     mock_count: int | None = Form(None, ge=0),
     mock_low_conf: int = Form(0, ge=0),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
 ):
     received = datetime.now()      # KPI 기준: 서버가 요청을 받은 시각
@@ -222,11 +331,14 @@ async def dropoff_photo(
         raise HTTPException(409, "승차 사진이 먼저 필요합니다")
 
     data = await read_image(image)
-    dets, mode = detect_people(data, mock_count, mock_low_conf, default_count=0)
+    dets, mode = await run_detector(data, mock_count, mock_low_conf, 0)
     person_count = len(dets)
     remaining = max(person_count - exclude_count, 0)
     low = low_conf_count(dets)
-    verdict = judge(t.boarding_count, remaining, low)
+    # 판정(judge) → Agent 가 사진 상태까지 보고 최종 결정 (등급은 올리기만, 내리지 않음)
+    verdict = await run_in_threadpool(
+        agent_service.decide, judge(t.boarding_count, remaining, low), data,
+    )
     path = storage.save_image(t.id, "dropoff", image.filename, data)
 
     # 종점(하차) 이벤트
@@ -264,6 +376,21 @@ async def dropoff_photo(
         )
 
     db.commit()
+    if alert:
+        if background_tasks is not None:
+            background_tasks.add_task(notifier.send_alert_pushes, alert.id)
+            # AI ② 템플릿 요약을 응답 후 LLM 요약으로 보강 (응답을 늦추지 않음)
+            background_tasks.add_task(
+                llm_service.enrich_alert_summary,
+                alert.id,
+                verdict.get("brightness"),
+            )
+        else:
+            try:
+                notifier.send_alert_pushes(alert.id)
+            except Exception:
+                # background_tasks 가 없는 내부 호출에서도 푸시가 실패해도 응답은 유지한다.
+                pass
 
     # 실시간(SSE) 전송
     event_bus.publish("event", event_to_dict(ev))
@@ -282,6 +409,9 @@ async def dropoff_photo(
         "low_conf_count": low,
         "alert_id": alert_id,
         "detector_mode": mode,
+        "guidance": verdict["guidance"],                       # AI ④ 기사 행동 안내
+        "retake_recommended": verdict["retake_recommended"],
+        "agent_reasons": verdict["reasons"],
     }
 
 
@@ -348,19 +478,18 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
                 detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다."
             )
 
-        # 미하차 의심 경고가 모두 해결됐고
-        # 관리자가 안전 확인을 요청한 경우 종료 허용
-        t.status = TripStatus.CLOSED
-        t.confirm_method = body.method
-        # 시뮬레이션 여부는 운행 시작 시 결정하며 종료 시 변경하지 않는다.
-        t.ended_at = datetime.now()
-        db.commit()
+    # 결과가 OK 이거나, 미하차 의심 경고가 모두 해결된 경우 종료 허용
+    # (이전 코드는 이 부분이 if 안에 있어서 결과가 OK 인 정상 운행이 종료되지 않았음)
+    t.status = TripStatus.CLOSED
+    t.confirm_method = body.method
+    # 시뮬레이션 여부는 운행 시작 시 결정하며 종료 시 변경하지 않는다.
+    t.ended_at = datetime.now()
+    db.commit()
 
-        return {
-            "id": t.id,
-            "status": t.status.value,
-            "result": t.result.value,
-            "confirm_method": t.confirm_method.value,
-            "ended_at": t.ended_at,
-        }
-
+    return {
+        "id": t.id,
+        "status": t.status.value,
+        "result": t.result.value,
+        "confirm_method": t.confirm_method.value,
+        "ended_at": t.ended_at,
+    }

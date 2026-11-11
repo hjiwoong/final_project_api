@@ -25,3 +25,11 @@ web/style_backup.css
 
 # Local YOLO model
 yolov8n.pt
+
+# weights/
+diag_images/
+diag_out/
+check_server_model.py
+
+# RAG 임베딩 캐시 (knowledge/ 문서가 바뀌면 자동 재생성)
+rag_index.json
