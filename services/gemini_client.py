@@ -164,8 +164,6 @@ def embed(texts: list[str], kind: str = "document", titles: list[str] | None = N
             inputs = [f"task: search result | query: {t}" for t in texts]
         else:
             titles = titles or ["none"] * len(texts)
-            if len(titles) != len(texts):
-                raise ValueError("임베딩 제목 수가 입력 문장 수와 일치하지 않습니다")
             inputs = [f"title: {ti or 'none'} | text: {t}" for ti, t in zip(titles, texts)]
         config = types.EmbedContentConfig(output_dimensionality=EMBED_DIM)
 
@@ -175,20 +173,7 @@ def embed(texts: list[str], kind: str = "document", titles: list[str] | None = N
         result = _with_retry(lambda: get_client().models.embed_content(
             model=GEMINI_EMBED_MODEL, contents=batch, config=config,
         ))
-        embeddings = getattr(result, "embeddings", None)
-        if embeddings is None or len(embeddings) != len(batch):
-            actual = 0 if embeddings is None else len(embeddings)
-            raise RuntimeError(
-                f"Gemini 임베딩 개수 불일치: 요청 {len(batch)}개, 응답 {actual}개"
-            )
-        for embedding in embeddings:
-            values = list(embedding.values or [])
-            if len(values) != EMBED_DIM or not all(math.isfinite(v) for v in values):
-                raise RuntimeError(
-                    f"Gemini 임베딩 벡터 형식이 올바르지 않습니다: "
-                    f"기대 차원 {EMBED_DIM}, 응답 차원 {len(values)}"
-                )
-            vectors.append(_l2_normalize(values))
+        vectors.extend(_l2_normalize(list(e.values)) for e in result.embeddings)
     return vectors
 
 

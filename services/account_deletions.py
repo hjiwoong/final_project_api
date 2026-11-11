@@ -1,9 +1,6 @@
 from datetime import datetime, timedelta
 
 from database.db_connection import SessionLocal
-from models.models import (
-    ChildRequest, Guardian, Notification, PushToken, SocialAccount, User, UserRole,
-)
 
 ACCOUNT_DELETION_GRACE_DAYS = 30
 
@@ -19,16 +16,12 @@ def delete_expired_accounts() -> int:
                 User.role == UserRole.PARENT,
                 User.deletion_requested_at <= cutoff,
             )
-            .with_for_update()
             .all()
         ]
         if not user_ids:
             return 0
 
         db.query(Notification).filter(Notification.user_id.in_(user_ids)).delete(
-            synchronize_session=False
-        )
-        db.query(PushToken).filter(PushToken.user_id.in_(user_ids)).delete(
             synchronize_session=False
         )
         db.query(ChildRequest).filter(ChildRequest.user_id.in_(user_ids)).delete(

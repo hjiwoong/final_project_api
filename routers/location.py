@@ -1,7 +1,7 @@
 import os
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -94,22 +94,6 @@ def _geocode(address: str) -> tuple[float, float]:
 @router.get("/me/location")
 def get_my_location(me: User = Depends(require_parent)):
     return _location_response(me)
-
-
-@router.get("/me/location/search")
-def search_my_location(
-    address: str = Query(..., min_length=1, max_length=255),
-    me: User = Depends(require_parent),
-):
-    normalized_address = address.strip()
-    if not normalized_address:
-        raise HTTPException(422, "주소를 입력하세요")
-    latitude, longitude = _geocode(normalized_address)
-    return {
-        "address": normalized_address,
-        "latitude": latitude,
-        "longitude": longitude,
-    }
 
 
 @router.put("/me/location")
