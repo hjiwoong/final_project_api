@@ -679,7 +679,7 @@
       <ul class="trip-event-list">
         ${events.map((e) => {
           const label = EVENT_LABEL[e.event_type] || e.event_type;
-          const hasPhoto = e.image_available && e.event_type !== 'MISMATCH';
+          const hasPhoto = Boolean(e.image_available);
   
           return `
             <li class="trip-event-item">
