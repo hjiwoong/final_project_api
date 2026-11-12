@@ -11,6 +11,7 @@ def trip_to_dict(t: Trip) -> dict:
         "bus_name": t.bus.name if t.bus else None,
         "plate_no": t.bus.plate_no if t.bus else None,
         "driver_id": t.driver_id,
+        "driver_name": t.driver.name if t.driver else None,
         "status": t.status.value,
         "result": t.result.value,
         "simulation_mode": t.simulation_mode,

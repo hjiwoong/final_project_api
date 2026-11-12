@@ -105,6 +105,7 @@ class Student(Base):
     guardians = relationship("Guardian", back_populates="student")
     bus_students = relationship("BusStudent", back_populates="student")
     attendances = relationship("Attendance", back_populates="student")
+    trip_attendances = relationship("TripStudentAttendance", back_populates="student")
 
 
 class Guardian(Base):
@@ -223,6 +224,28 @@ class Trip(Base):
     driver = relationship("User")
     events = relationship("BoardingEvent", back_populates="trip")
     alerts = relationship("Alert", back_populates="trip")
+    student_attendances = relationship(
+        "TripStudentAttendance", back_populates="trip", cascade="all, delete-orphan"
+    )
+
+
+class TripStudentAttendance(Base):
+    """자녀별 운행 승·하차 확인 기록"""
+    __tablename__ = "trip_student_attendances"
+    __table_args__ = (
+        UniqueConstraint("trip_id", "student_id", name="uq_trip_student_attendance"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trip_id = Column(Integer, ForeignKey("trips.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
+    boarding_confirmed_at = Column(DateTime, nullable=True)
+    boarding_confirmed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    alighting_confirmed_at = Column(DateTime, nullable=True)
+    alighting_confirmed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    trip = relationship("Trip", back_populates="student_attendances")
+    student = relationship("Student", back_populates="trip_attendances")
 
 
 class BoardingEvent(Base):

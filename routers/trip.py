@@ -13,6 +13,7 @@ from models.models import (
     Alert, AlertStatus,
     Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod,
     EventType, EventImage, Student, Trip, TripResult, TripStatus, User,
+    TripStudentAttendance,
 )
 from routers.location import student_location
 from services import agent_service, event_bus, llm_service, notifier, storage
@@ -114,6 +115,25 @@ def start_trip(body: TripStart, me: User = Depends(require_admin), db: Session =
         expected_count=expected_students(db, bus.id),
         simulation_mode=body.simulation_mode,
     )
+    student_ids = [
+        row[0]
+        for row in db.query(BusStudent.student_id).filter(BusStudent.bus_id == bus.id)
+    ]
+    absent_ids = set()
+    if student_ids:
+        absent_ids = {
+            row[0]
+            for row in db.query(Attendance.student_id).filter(
+                Attendance.student_id.in_(student_ids),
+                Attendance.date == date.today(),
+                Attendance.is_absent.is_(True),
+            )
+        }
+    t.student_attendances = [
+        TripStudentAttendance(student_id=student_id)
+        for student_id in student_ids
+        if student_id not in absent_ids
+    ]
     db.add(t)
     db.commit()
     db.refresh(t)
@@ -186,6 +206,22 @@ def get_trip(trip_id: int, db: Session = Depends(get_db)):
     return {
         **trip_to_dict(t),
         "events": [event_to_dict(e) for e in t.events],
+        "student_attendances": [
+            {
+                "student_id": attendance.student_id,
+                "student_name": attendance.student.name,
+                "class_name": attendance.student.class_name,
+                "boarding_confirmed_at": attendance.boarding_confirmed_at,
+                "alighting_confirmed_at": attendance.alighting_confirmed_at,
+            }
+            for attendance in sorted(
+                t.student_attendances,
+                key=lambda item: (
+                    item.student.name if item.student else "",
+                    item.student_id,
+                ),
+            )
+        ],
         "open_alerts": [alert_to_dict(a) for a in notifier.open_alerts(db, t.id)],
     }
 
