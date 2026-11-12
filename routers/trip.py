@@ -12,7 +12,7 @@ from database.db_connection import get_db
 from models.models import (
     Alert, AlertStatus,
     Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod, Guardian,
-    EventType, Student, Trip, TripResult, TripStatus, User,
+    EventType, Student, Trip, TripResult, TripStatus, User,TripSchedule
 )
 from services.location_crypto import decrypt_coordinate_value, decrypt_location_value
 from services import agent_service, event_bus, llm_service, notifier, storage
@@ -27,6 +27,7 @@ router = APIRouter(prefix="/trips", tags=["운행"], dependencies=[Depends(requi
 class TripStart(BaseModel):
     bus_id: int
     simulation_mode: bool = False
+    schedule_id: int | None = None
 
 
 class ConfirmBody(BaseModel):
@@ -82,18 +83,31 @@ async def run_detector(data: bytes, mock_count, mock_low_conf, default_count: in
 
 # ---------- 운행 시작 / 조회 ----------
 @router.post("", status_code=201)
-def start_trip(body: TripStart, me: User = Depends(require_admin), db: Session = Depends(get_db)):
+def start_trip(
+    body: TripStart,
+    background_tasks: BackgroundTasks,
+    me: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """운행 시작: trips 레코드 생성 (탑승 예정 인원 = 배정 - 오늘 결석)"""
     bus = db.get(Bus, body.bus_id)
     if not bus:
         raise HTTPException(404, "버스를 찾을 수 없습니다")
+
     running = (
         db.query(Trip)
-        .filter(Trip.bus_id == body.bus_id, Trip.status == TripStatus.IN_PROGRESS)
+        .filter(
+            Trip.bus_id == body.bus_id,
+            Trip.status == TripStatus.IN_PROGRESS
+        )
         .first()
     )
+
     if running:
-        raise HTTPException(409, f"이미 진행 중인 운행이 있습니다 (trip_id={running.id})")
+        raise HTTPException(
+            409,
+            f"이미 진행 중인 운행이 있습니다 (trip_id={running.id})"
+        )
 
     t = Trip(
         bus_id=bus.id,
@@ -101,9 +115,42 @@ def start_trip(body: TripStart, me: User = Depends(require_admin), db: Session =
         expected_count=expected_students(db, bus.id),
         simulation_mode=body.simulation_mode,
     )
+    schedule = None
+
+    if body.schedule_id is not None:
+        schedule = db.get(TripSchedule, body.schedule_id)
+
+        if schedule is None:
+            raise HTTPException(404, "운행 시간표를 찾을 수 없습니다.")
+
+        if schedule.bus_id != body.bus_id:
+            raise HTTPException(400, "버스와 운행 시간표가 일치하지 않습니다.")
+
+        if schedule.service_date != date.today():
+            raise HTTPException(400, "오늘 날짜의 운행 시간표만 시작할 수 있습니다.")
+
+        if schedule.trip_id is not None:
+            raise HTTPException(409, "이미 시작된 운행 시간표입니다.")
     db.add(t)
+    db.flush()
+    if schedule is not None:
+        schedule.trip_id = t.id
+
+    # 추가: 운행 시작 알림 생성
+    notification_ids = notifier.create_trip_notifications(
+        db, t, "STARTED"
+    )
+
     db.commit()
     db.refresh(t)
+
+    # 추가: DB 저장 성공 후 학부모에게 FCM 푸시 전송
+    if notification_ids:
+        background_tasks.add_task(
+            notifier.send_trip_pushes,
+            notification_ids,
+        )
+
     return trip_to_dict(t)
 
 
@@ -417,7 +464,7 @@ async def dropoff_photo(
 
 # ---------- 운행 종료 ----------
 @router.post("/{trip_id}/confirm")
-def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db)):
+def confirm_trip(trip_id: int, body: ConfirmBody,background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """하차 확인 후 운행 종료. 결과가 OK 가 아니면 409"""
     t = get_trip_or_404(db, trip_id)
     if t.status == TripStatus.CLOSED:
@@ -452,7 +499,17 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
         t.confirm_method = body.method
         t.ended_at = datetime.now()
 
+        notification_ids = notifier.create_trip_notifications(
+            db, t, "ENDED"
+        )
+
         db.commit()
+
+        if notification_ids:
+            background_tasks.add_task(
+                notifier.send_trip_pushes,
+                notification_ids,
+            )
 
         return {
             "id": t.id,
