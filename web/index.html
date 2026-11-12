@@ -11,15 +11,27 @@
 </head>
 <body>
 
-<section id="login" class="login" hidden>
-  <form id="login-form" class="login-box" autocomplete="on">
-    <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span><span>통학버스 안전관리</span></div>
-    <p class="login-lead">관리자 계정으로 로그인하세요.</p>
-    <label>이메일<input name="email" type="email" autocomplete="username" required></label>
-    <label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
-    <p id="login-error" class="form-error" role="alert" hidden></p>
-    <button type="submit" class="btn primary">로그인</button>
-  </form>
+<section id="login" class="login login-split" hidden>
+  <div class="login-visual">
+    <div class="login-visual-content">
+      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span><span>통학버스 안전관리</span></div>
+      <div class="login-hero">
+        <h1>아이들의 안전한 등하교,<br>한눈에 관리하세요.</h1>
+        <p>운행 현황과 학생 승하차 기록,<br>안전 경고까지 하나의 시스템에서 관리합니다.</p>
+      </div>
+      <div class="login-features"><span>운행 현황 관리</span><span>학생 승하차 기록</span><span>안전 경고 관리</span></div>
+    </div>
+  </div>
+  <div class="login-panel">
+    <form id="login-form" class="login-box" autocomplete="on">
+      <div class="login-panel-heading"><h2>관리자 로그인</h2><p>관리자 계정으로 로그인하세요.</p></div>
+      <label>이메일<input name="email" type="email" autocomplete="username" placeholder="이메일을 입력하세요" required></label>
+      <label>비밀번호<input name="password" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요" required></label>
+      <p id="login-error" class="form-error" role="alert" hidden></p>
+      <button type="submit" class="btn primary">로그인</button>
+      <p class="login-footer">통학버스 안전관리 시스템 · 관리자 전용</p>
+    </form>
+  </div>
 </section>
 
 <div id="app" class="app" hidden>

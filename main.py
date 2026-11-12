@@ -132,5 +132,5 @@ if __name__ == "__main__":  # 직접 실행 시 uvicorn 서버 시작, python ma
     check_db_or_exit()
     # 같은 Wi-Fi의 휴대폰에서도 접속할 수 있도록 모든 네트워크 인터페이스에서 수신
     # 자동 재시작(reload)은 사진 저장 때마다 서버가 재시작될 수 있어 기본은 끔. 필요하면 .env 에 RELOAD=1
-    uvicorn.run("main:app", host="0.0.0.0", port=8000,
+    uvicorn.run("main:app", host="127.0.0.1", port=8000,
                 reload=os.getenv("RELOAD", "0").lower() in ("1", "true"))
