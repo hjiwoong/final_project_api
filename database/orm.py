@@ -116,3 +116,48 @@ def init_db():
             connection.execute(text(
                 "CREATE INDEX ix_users_deletion_requested_at ON users (deletion_requested_at)"
             ))
+        # ---------- 운행 알림용 notifications 컬럼 추가 ----------
+        notification_columns = {
+            "trip_id": "INT NULL",
+            "category": "VARCHAR(20) NOT NULL DEFAULT 'URGENT'",
+            "event_type": "VARCHAR(30) NULL",
+        }
+
+        notification_existing = {
+            column["name"]
+            for column in inspect(connection).get_columns("notifications")
+        }
+
+        for column, column_type in notification_columns.items():
+            if column not in notification_existing:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE notifications "
+                        f"ADD COLUMN {column} {column_type}"
+                    )
+                )
+
+        # 일반 운행 알림은 alert_id 없이 저장 가능
+        alert_id_column = next(
+            column
+            for column in inspect(connection).get_columns("notifications")
+            if column["name"] == "alert_id"
+        )
+
+        if not alert_id_column["nullable"]:
+            connection.execute(
+                text(
+                    "ALTER TABLE notifications "
+                    "MODIFY COLUMN alert_id INT NULL"
+                )
+            )
+
+        # 기존 경고 알림의 카테고리 보정
+        connection.execute(
+            text(
+                "UPDATE notifications "
+                "SET category = 'URGENT' "
+                "WHERE alert_id IS NOT NULL "
+                "AND (category IS NULL OR category = '')"
+            )
+        )

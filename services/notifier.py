@@ -1,3 +1,4 @@
+
 """경고(alert) 생성 + 수신자별 알림(notification) 및 푸시 전송
 
 수신자
@@ -7,6 +8,7 @@
   (실패해도 알림 기록은 유지, 만료된 토큰은 자동 삭제)
 LLM 요약은 services/llm_service.py, Agent 판단은 services/agent_service.py
 """
+
 import logging
 import os
 from datetime import date, datetime
@@ -55,8 +57,13 @@ def raise_alert(
             _notify(db, a, trip, level)
         return a
 
-    a = Alert(trip_id=trip.id, event_id=event.id, level=level,
-              message=message, llm_summary=summary)
+    a = Alert(
+        trip_id=trip.id,
+        event_id=event.id,
+        level=level,
+        message=message,
+        llm_summary=summary,
+    )
     db.add(a)
     db.flush()
     _notify(db, a, trip, level)
@@ -77,17 +84,24 @@ def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
     title = ("🚨 " if level == AlertLevel.URGENT else "⚠️ ") + (alert.message or "경고")
     body = f"{bus_name} · {alert.llm_summary}"
 
-    user_ids = {u.id for u in db.query(User).filter(User.role == UserRole.ADMIN).all()}
+    user_ids = {
+        u.id
+        for u in db.query(User).filter(User.role == UserRole.ADMIN).all()
+    }
+
     if level == AlertLevel.URGENT:
         # 오늘 결석으로 설정한 학생은 버스에 타지 않았으므로 제외
         absent_ids = db.query(Attendance.student_id).filter(
-            Attendance.date == date.today(), Attendance.is_absent.is_(True)
+            Attendance.date == date.today(),
+            Attendance.is_absent.is_(True),
         )
         parents = (
             db.query(Guardian.user_id)
             .join(BusStudent, BusStudent.student_id == Guardian.student_id)
-            .filter(BusStudent.bus_id == trip.bus_id,
-                    Guardian.student_id.notin_(absent_ids))
+            .filter(
+                BusStudent.bus_id == trip.bus_id,
+                Guardian.student_id.notin_(absent_ids),
+            )
             .all()
         )
         user_ids |= {p[0] for p in parents}
@@ -98,8 +112,16 @@ def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
             Notification.alert_id == alert.id
         )
     }
+
     for uid in user_ids - already_notified:
-        db.add(Notification(alert_id=alert.id, user_id=uid, title=title, body=body))
+        db.add(
+            Notification(
+                alert_id=alert.id,
+                user_id=uid,
+                title=title,
+                body=body,
+            )
+        )
 
 
 ANDROID_CHANNEL_ID = os.getenv("FCM_ANDROID_CHANNEL_ID", "safety_alerts")
@@ -121,6 +143,7 @@ def push_status() -> dict:
         installed = True
     except ImportError:
         installed = False
+
     return {
         "fcm_installed": installed,
         "fcm_credentials_found": os.path.isfile(path),
@@ -163,29 +186,39 @@ def _push_targets(db: Session, alert_id: int) -> list[tuple[int, str, str, str]]
     )
     if not rows:
         return []
+
     user_ids = {row[0] for row in rows}
     tokens: dict[int, set[str]] = {}
+
     for user_id, token in db.query(PushToken.user_id, PushToken.token).filter(
         PushToken.user_id.in_(user_ids)
     ):
         tokens.setdefault(user_id, set()).add(token)
+
     for user_id, token in db.query(User.id, User.push_token).filter(
-        User.id.in_(user_ids), User.push_token.isnot(None)
+        User.id.in_(user_ids),
+        User.push_token.isnot(None),
     ):
         tokens.setdefault(user_id, set()).add(token)
 
     parents = {
         user_id
         for (user_id,) in db.query(User.id).filter(
-            User.id.in_(user_ids), User.role == UserRole.PARENT
+            User.id.in_(user_ids),
+            User.role == UserRole.PARENT,
         )
     }
+
     targets, seen = [], set()
-    for user_id, title, body in sorted(rows, key=lambda row: row[0] not in parents):
+
+    for user_id, title, body in sorted(
+        rows, key=lambda row: row[0] not in parents
+    ):
         for token in sorted(tokens.get(user_id, ())):
             if token not in seen:
                 seen.add(token)
                 targets.append((user_id, title, body or "", token))
+
     return targets
 
 
@@ -198,21 +231,30 @@ def send_alert_pushes(alert_id: int) -> None:
     from firebase_admin.exceptions import FirebaseError
 
     messaging, app = firebase
+
     with SessionLocal() as db:
         targets = _push_targets(db, alert_id)
+
     if not targets:
         logger.info("alert_id=%s: 등록된 FCM 수신 기기가 없습니다", alert_id)
         return
 
     invalid_tokens = []
     sent = 0
+
     for user_id, title, body, token in targets:
         try:
             messaging.send(
                 messaging.Message(
                     token=token,
-                    notification=messaging.Notification(title=title, body=body),
-                    data={"type": "safety_alert", "alert_id": str(alert_id)},
+                    notification=messaging.Notification(
+                        title=title,
+                        body=body,
+                    ),
+                    data={
+                        "type": "safety_alert",
+                        "alert_id": str(alert_id),
+                    },
                     android=messaging.AndroidConfig(
                         priority="high",
                         ttl=3600,
@@ -234,9 +276,12 @@ def send_alert_pushes(alert_id: int) -> None:
                 app=app,
             )
             sent += 1
+
         except FirebaseError as error:
             logger.exception(
-                "FCM 전송 실패: user_id=%s alert_id=%s", user_id, alert_id
+                "FCM 전송 실패: user_id=%s alert_id=%s",
+                user_id,
+                alert_id,
             )
             if isinstance(error, messaging.UnregisteredError) or getattr(
                 error, "code", None
@@ -246,14 +291,210 @@ def send_alert_pushes(alert_id: int) -> None:
                 "messaging/invalid-registration-token",
             }:
                 invalid_tokens.append(token)
-    logger.info("alert_id=%s: FCM 푸시 %d/%d건 발송", alert_id, sent, len(targets))
+
+    logger.info(
+        "alert_id=%s: FCM 푸시 %d/%d건 발송",
+        alert_id,
+        sent,
+        len(targets),
+    )
 
     if invalid_tokens:
         with SessionLocal() as db:
             db.query(PushToken).filter(
                 PushToken.token.in_(invalid_tokens)
             ).delete(synchronize_session=False)
-            db.query(User).filter(User.push_token.in_(invalid_tokens)).update(
-                {"push_token": None}, synchronize_session=False
+
+            db.query(User).filter(
+                User.push_token.in_(invalid_tokens)
+            ).update(
+                {"push_token": None},
+                synchronize_session=False,
             )
+
+            db.commit()
+
+
+# ---------- 운행 시작 / 종료 알림 ----------
+
+def create_trip_notifications(
+    db: Session,
+    trip: Trip,
+    event_type: str,
+) -> list[int]:
+    """운행 시작/종료 알림을 학부모별로 저장한다."""
+    if trip.simulation_mode:
+        return []
+
+    if event_type not in {"STARTED", "ENDED"}:
+        raise ValueError("지원하지 않는 운행 알림 종류입니다.")
+
+    bus_name = trip.bus.name if trip.bus else f"{trip.bus_id}번 버스"
+
+    if event_type == "STARTED":
+        title = "운행 시작 알림"
+        body = f"{bus_name} 운행이 시작되었습니다."
+    else:
+        title = "운행 종료 알림"
+        body = f"{bus_name} 운행이 종료되었습니다."
+
+    parent_ids = {
+        user_id
+        for (user_id,) in (
+            db.query(Guardian.user_id)
+            .join(
+                BusStudent,
+                BusStudent.student_id == Guardian.student_id,
+            )
+            .filter(BusStudent.bus_id == trip.bus_id)
+            .all()
+        )
+    }
+
+    existing_ids = {
+        user_id
+        for (user_id,) in (
+            db.query(Notification.user_id)
+            .filter(
+                Notification.trip_id == trip.id,
+                Notification.event_type == event_type,
+            )
+            .all()
+        )
+    }
+
+    notifications = []
+
+    for user_id in parent_ids - existing_ids:
+        notification = Notification(
+            user_id=user_id,
+            trip_id=trip.id,
+            alert_id=None,
+            category="TRIP",
+            event_type=event_type,
+            title=title,
+            body=body,
+        )
+        db.add(notification)
+        notifications.append(notification)
+
+    db.flush()
+
+    return [notification.id for notification in notifications]
+
+
+def send_trip_pushes(notification_ids: list[int]) -> None:
+    """DB에 저장된 운행 알림을 학부모 기기로 전송한다."""
+    if not notification_ids:
+        return
+
+    firebase = _firebase_messaging()
+    if firebase is None:
+        return
+
+    from firebase_admin.exceptions import FirebaseError
+
+    messaging, app = firebase
+
+    with SessionLocal() as db:
+        rows = (
+            db.query(Notification)
+            .filter(Notification.id.in_(notification_ids))
+            .all()
+        )
+
+        user_ids = {row.user_id for row in rows}
+        tokens = {}
+
+        for user_id, token in (
+            db.query(PushToken.user_id, PushToken.token)
+            .filter(PushToken.user_id.in_(user_ids))
+            .all()
+        ):
+            tokens.setdefault(user_id, set()).add(token)
+
+        for user_id, token in (
+            db.query(User.id, User.push_token)
+            .filter(
+                User.id.in_(user_ids),
+                User.push_token.isnot(None),
+            )
+            .all()
+        ):
+            tokens.setdefault(user_id, set()).add(token)
+
+        targets = [
+            (
+                row.id,
+                row.title,
+                row.body or "",
+                row.trip_id,
+                row.event_type or "",
+                token,
+            )
+            for row in rows
+            for token in tokens.get(row.user_id, set())
+        ]
+
+    invalid_tokens = []
+    seen = set()
+
+    for notification_id, title, body, trip_id, event_type, token in targets:
+        if token in seen:
+            continue
+        seen.add(token)
+
+        try:
+            messaging.send(
+                messaging.Message(
+                    token=token,
+                    notification=messaging.Notification(
+                        title=title,
+                        body=body,
+                    ),
+                    data={
+                        "type": "trip_notification",
+                        "notification_id": str(notification_id),
+                        "trip_id": str(trip_id),
+                        "event_type": event_type,
+                    },
+                    android=messaging.AndroidConfig(
+                        priority="high",
+                        notification=messaging.AndroidNotification(
+                            channel_id=ANDROID_CHANNEL_ID,
+                            sound="default",
+                        ),
+                    ),
+                ),
+                app=app,
+            )
+
+        except FirebaseError as error:
+            logger.exception(
+                "운행 알림 FCM 전송 실패: notification_id=%s",
+                notification_id,
+            )
+
+            if isinstance(error, messaging.UnregisteredError) or getattr(
+                error, "code", None
+            ) in {
+                "NOT_FOUND",
+                "messaging/registration-token-not-registered",
+                "messaging/invalid-registration-token",
+            }:
+                invalid_tokens.append(token)
+
+    if invalid_tokens:
+        with SessionLocal() as db:
+            db.query(PushToken).filter(
+                PushToken.token.in_(invalid_tokens)
+            ).delete(synchronize_session=False)
+
+            db.query(User).filter(
+                User.push_token.in_(invalid_tokens)
+            ).update(
+                {"push_token": None},
+                synchronize_session=False,
+            )
+
             db.commit()

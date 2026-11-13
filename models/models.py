@@ -198,6 +198,35 @@ class BusStudent(Base):
     bus = relationship("Bus", back_populates="bus_students")
     student = relationship("Student", back_populates="bus_students")
 
+class TripSchedule(Base):
+    """날짜별 버스 운행 예정 시각 및 지연 알림 상태"""
+    __tablename__ = "trip_schedules"
+    __table_args__ = (
+        UniqueConstraint("bus_id", "service_date", name="uq_trip_schedule_bus_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    bus_id = Column(
+        Integer,
+        ForeignKey("buses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    service_date = Column(Date, nullable=False)
+    scheduled_at = Column(DateTime, nullable=False)
+
+    # 신규: 이 시간표로 시작한 실제 운행
+    trip_id = Column(
+        Integer,
+        ForeignKey("trips.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
+
+    delayed_notified_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
 
 # ---------- 운행 ----------
 class Trip(Base):
@@ -298,17 +327,39 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    alert_id = Column(Integer, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    alert_id = Column(
+        Integer,
+        ForeignKey("alerts.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # 신규: 운행 알림 구분
+    trip_id = Column(
+        Integer,
+        ForeignKey("trips.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    category = Column(
+        String(20),
+        nullable=False,
+        default="URGENT",
+        server_default="URGENT",
+    )
+    event_type = Column(String(30), nullable=True)
 
     title = Column(String(255), nullable=False)
     body = Column(Text, nullable=True)
-    sent_at = Column(DateTimeMs, default=datetime.now)      # KPI: 알림 발송(기록) 시각
+    sent_at = Column(DateTimeMs, default=datetime.now)
     read_at = Column(DateTime, nullable=True)
 
     alert = relationship("Alert", back_populates="notifications")
     user = relationship("User", back_populates="notifications")
-
 
 class PushToken(Base):
     """기기별 FCM 토큰. 같은 기기의 토큰은 계정 간 이동할 수 있다."""
