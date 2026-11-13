@@ -152,6 +152,8 @@ def embed(texts: list[str], kind: str = "document", titles: list[str] | None = N
 
     if not texts:
         return []
+    if titles is not None and len(titles) != len(texts):
+        raise ValueError("임베딩 제목 수가 텍스트 수와 일치하지 않습니다")
     legacy = "embedding-001" in GEMINI_EMBED_MODEL
     if legacy:
         inputs = list(texts)
@@ -170,9 +172,13 @@ def embed(texts: list[str], kind: str = "document", titles: list[str] | None = N
     vectors: list[list[float]] = []
     for start in range(0, len(inputs), 50):          # 한 번에 너무 많이 보내지 않게 50개씩
         batch = inputs[start:start + 50]
+        contents = [types.Content(parts=[types.Part.from_text(text=text)]) for text in batch]
         result = _with_retry(lambda: get_client().models.embed_content(
-            model=GEMINI_EMBED_MODEL, contents=batch, config=config,
+            model=GEMINI_EMBED_MODEL, contents=contents, config=config,
         ))
+        if result.embeddings is None or len(result.embeddings) != len(batch):
+            count = len(result.embeddings) if result.embeddings is not None else 0
+            raise RuntimeError(f"임베딩 수 불일치: 요청 {len(batch)}개, 응답 {count}개")
         vectors.extend(_l2_normalize(list(e.values)) for e in result.embeddings)
     return vectors
 

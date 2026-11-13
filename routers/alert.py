@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session
 from core.security import require_admin, require_parent
 from database.db_connection import get_db
 from models.models import (
-    Alert, AlertLevel, AlertStatus, Attendance, BusStudent, Guardian, Trip, User,
+    Alert, AlertLevel, AlertStatus, Attendance, BoardingEvent, BusStudent,
+    EventType, Guardian, Trip, User,
 )
 from services import event_bus
+from services.event_images import event_image_response
 from services.serializers import (
     alert_to_dict, alert_to_parent_dict, event_to_dict, trip_to_dict,
 )
@@ -61,7 +63,40 @@ def get_alert(alert_id: int, db: Session = Depends(get_db)):
         **alert_to_dict(a),
         "trip": trip_to_dict(a.trip),
         "event": event_to_dict(a.event, with_detections=True) if a.event else None,
+        "alert_event": event_to_dict(a.event) if a.event else None,
+        "trip_events": _trip_photo_events(a),
     }
+
+
+def _trip_photo_events(a: Alert) -> list[dict]:
+    """경고가 속한 운행의 승차/종점 사진 이벤트"""
+    return [
+        event_to_dict(event)
+        for event in a.trip.events
+        if event.event_type in (EventType.BOARDING, EventType.DROPOFF)
+    ]
+
+
+def _alert_event_or_404(db: Session, alert: Alert, event_id: int) -> BoardingEvent:
+    """경고와 같은 운행의 승하차 사진이거나, 경고에 연결된 이벤트만 허용"""
+    event = db.get(BoardingEvent, event_id)
+    if (
+        not event
+        or event.trip_id != alert.trip_id
+        or (
+            event.event_type not in (EventType.BOARDING, EventType.DROPOFF)
+            and alert.event_id != event_id
+        )
+    ):
+        raise HTTPException(404, "사진을 찾을 수 없습니다")
+    return event
+
+
+@router.get("/alerts/{alert_id}/events/{event_id}/image", dependencies=[Depends(require_admin)])
+def get_alert_event_image(alert_id: int, event_id: int, db: Session = Depends(get_db)):
+    """관리자용 경고 운행 승하차 사진"""
+    alert = get_alert_or_404(db, alert_id)
+    return event_image_response(_alert_event_or_404(db, alert, event_id), db)
 
 
 @router.post("/alerts/{alert_id}/ack", dependencies=[Depends(require_admin)])
@@ -159,4 +194,23 @@ def my_alert_detail(
     a = _parent_alert_query(db, me).filter(Alert.id == alert_id).first()
     if not a:
         raise HTTPException(404, "경고를 찾을 수 없습니다")
-    return alert_to_parent_dict(a)
+    return {
+        **alert_to_parent_dict(a),
+        "alert_event": event_to_dict(a.event) if a.event else None,
+        "trip_events": _trip_photo_events(a),
+    }
+
+
+@router.get("/me/alerts/{alert_id}/events/{event_id}/image")
+def my_alert_event_image(
+    alert_id: int,
+    event_id: int,
+    me: User = Depends(require_parent),
+    db: Session = Depends(get_db),
+):
+    """학부모는 본인 자녀의 경고에 연결된 운행 승하차 사진만 조회"""
+    alert = _parent_alert_query(db, me).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(404, "경고를 찾을 수 없습니다")
+
+    return event_image_response(_alert_event_or_404(db, alert, event_id), db)

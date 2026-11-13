@@ -15,6 +15,7 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import relationship
 
 from database.orm import Base
+from sqlalchemy.dialects.mysql import MEDIUMBLOB
 
 # KPI(업로드→알림 지연)를 ms 단위로 재기 위한 마이크로초 정밀 시각
 # (MySQL 기본 DATETIME 은 초 단위라 DATETIME(6) 사용)
@@ -80,10 +81,6 @@ class User(Base):
         String(20), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
     )
     push_token = Column(String(512), nullable=True)
-    # 주소·좌표는 Fernet 암호문으로 저장 (services/location_crypto.py)
-    address_encrypted = Column(String(1024), nullable=True)
-    latitude_encrypted = Column(String(255), nullable=True)
-    longitude_encrypted = Column(String(255), nullable=True)
     deletion_requested_at = Column(DateTime, nullable=True, index=True)   # 계정 삭제 유예 시작 시각
     created_at = Column(DateTime, default=datetime.now)
 
@@ -99,11 +96,16 @@ class Student(Base):
     name = Column(String(100), nullable=False)
     class_name = Column(String(50), nullable=True)      # 예: 1-2
     consent_at = Column(DateTime, nullable=True)        # 보호자 동의 시각
+    # 자녀 승하차 주소·좌표는 Fernet 암호문으로 저장 (services/location_crypto.py)
+    address_encrypted = Column(String(1024), nullable=True)
+    latitude_encrypted = Column(String(255), nullable=True)
+    longitude_encrypted = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     guardians = relationship("Guardian", back_populates="student")
     bus_students = relationship("BusStudent", back_populates="student")
     attendances = relationship("Attendance", back_populates="student")
+    trip_attendances = relationship("TripStudentAttendance", back_populates="student")
 
 
 class Guardian(Base):
@@ -251,6 +253,28 @@ class Trip(Base):
     driver = relationship("User")
     events = relationship("BoardingEvent", back_populates="trip")
     alerts = relationship("Alert", back_populates="trip")
+    student_attendances = relationship(
+        "TripStudentAttendance", back_populates="trip", cascade="all, delete-orphan"
+    )
+
+
+class TripStudentAttendance(Base):
+    """자녀별 운행 승·하차 확인 기록"""
+    __tablename__ = "trip_student_attendances"
+    __table_args__ = (
+        UniqueConstraint("trip_id", "student_id", name="uq_trip_student_attendance"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trip_id = Column(Integer, ForeignKey("trips.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
+    boarding_confirmed_at = Column(DateTime, nullable=True)
+    boarding_confirmed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    alighting_confirmed_at = Column(DateTime, nullable=True)
+    alighting_confirmed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    trip = relationship("Trip", back_populates="student_attendances")
+    student = relationship("Student", back_populates="trip_attendances")
 
 
 class BoardingEvent(Base):
@@ -345,3 +369,17 @@ class PushToken(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     token = Column(String(512), nullable=False, unique=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+from sqlalchemy import LargeBinary
+
+class EventImage(Base):
+    __tablename__ = "event_images"
+
+    event_id = Column(
+        Integer,
+        ForeignKey("boarding_events.id", ondelete="CASCADE"),
+        primary_key=True
+    )
+
+    image_data = Column(MEDIUMBLOB, nullable=False)
+    content_type = Column(String(100), nullable=False, default="image/jpeg")

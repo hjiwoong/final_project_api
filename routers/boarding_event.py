@@ -1,14 +1,14 @@
-import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from core.security import require_admin, require_admin_header_or_query
 from database.db_connection import get_db
 from models.models import BoardingEvent, EventType
 from services import event_bus
+from services.event_images import event_image_response
 from services.serializers import event_to_dict, image_available
 
 router = APIRouter(tags=["이벤트"])
@@ -53,12 +53,8 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
 
 @router.get("/events/{event_id}/image", dependencies=[Depends(require_admin_header_or_query)])
 def get_event_image(event_id: int, db: Session = Depends(get_db)):
-    """사진 파일. 보관기간이 지났거나 파일이 없으면 410
-    (<img src> 용으로 ?token=JWT 도 허용)"""
     e = get_event_or_404(db, event_id)
-    if not image_available(e) or not os.path.exists(e.image_path):
-        raise HTTPException(410, "보관 기간이 지나 사진이 삭제되었습니다")
-    return FileResponse(e.image_path)
+    return event_image_response(e, db)
 
 
 @router.get("/stream/events", dependencies=[Depends(require_admin_header_or_query)])

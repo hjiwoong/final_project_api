@@ -26,21 +26,19 @@
 
 연결 해제는 보호자-자녀 관계만 제거하며, 학생 정보와 다른 보호자의 연결 및 요청 처리 이력은 유지합니다.
 
-## 보호자 통학 위치 API
+## 자녀 통학 위치 API
 
-보호자 계정에 도로명 주소와 WGS84 위도·경도(소수점 7자리)를 저장합니다. 주소만 보내면 서버가 네이버 클라우드 플랫폼 Geocoding API로 좌표를 조회합니다. 지도에서 위치를 보정한 경우에는 주소와 보정한 `latitude`, `longitude`를 함께 보내면 해당 좌표를 사용합니다. 주소와 좌표는 Fernet 인증 암호화로 DB에 암호문으로 저장되고, 본인 또는 관리자 권한 API 응답에서만 복호화됩니다. 서버 환경변수 `LOCATION_ENCRYPTION_KEY`에는 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` 명령으로 생성한 키를 비밀 저장소에 보관해 설정하세요. 키 분실 시 저장된 위치를 복구할 수 없으므로 암호화된 DB 백업과 별도로 안전한 백업이 필요합니다. 키가 누락되거나 형식이 잘못되면 서버 시작이 중단됩니다. 네이버 API 키는 서버 환경변수 `NAVER_MAPS_CLIENT_ID`, `NAVER_MAPS_CLIENT_SECRET`에 설정하며 클라이언트에 전달하지 않습니다.
+자녀(students)에 도로명 주소와 WGS84 위도·경도(소수점 7자리)를 저장합니다. 주소만 보내면 서버가 네이버 클라우드 플랫폼 Geocoding API로 좌표를 조회합니다. 지도에서 위치를 보정한 경우에는 주소와 보정한 `latitude`, `longitude`를 함께 보내면 해당 좌표를 사용합니다. 주소와 좌표는 Fernet 인증 암호화로 DB에 암호문으로 저장되고, 본인 또는 관리자 권한 API 응답에서만 복호화됩니다. 서버 환경변수 `LOCATION_ENCRYPTION_KEY`에는 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` 명령으로 생성한 키를 비밀 저장소에 보관해 설정하세요. 키 분실 시 저장된 위치를 복구할 수 없으므로 암호화된 DB 백업과 별도로 안전한 백업이 필요합니다. 키가 누락되거나 형식이 잘못되면 서버 시작이 중단됩니다. 네이버 API 키는 서버 환경변수 `NAVER_MAPS_CLIENT_ID`, `NAVER_MAPS_CLIENT_SECRET`에 설정하며 클라이언트에 전달하지 않습니다.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/me/location` | 로그인한 학부모 본인의 주소와 좌표 |
+| `GET` | `/me/location/search?address=` | 주소 자동완성 후보 목록(최대 5개, 2자 이상). 항목: `address`, `road_address`, `jibun_address`, `latitude`, `longitude` |
+| `GET` | `/me/children/{student_id}/location` | 내 자녀의 주소와 좌표 |
+| `PUT` | `/me/children/{student_id}/location` | 자녀 주소 저장/수정 및 좌표 지오코딩 또는 직접 보정 |
+| `DELETE` | `/me/children/{student_id}/location` | 자녀 주소와 좌표 삭제 |
+| `GET` | `/web/students/{student_id}/location` | 관리자 전용 자녀 위치 조회 |
 
-| `GET` | `/me/location/search?address=...` | 네이버 Geocoding으로 주소 좌표 검색 (네이버 키 미설정 시 `503`) |
-
-| `PUT` | `/me/location` | 본인 주소 저장/수정 및 좌표 지오코딩 또는 직접 보정 |
-| `DELETE` | `/me/location` | 본인 주소와 좌표 삭제 |
-| `GET` | `/web/users/{user_id}/location` | 관리자 전용 학부모 위치 조회 |
-
-`PUT /me/location` 요청 예시:
+`PUT /me/children/{student_id}/location` 요청 예시:
 
 ```json
 {"address": "서울특별시 중구 세종대로 110"}
@@ -52,12 +50,16 @@
 {"address": "서울특별시 중구 세종대로 110", "latitude": 37.5665, "longitude": 126.9780}
 ```
 
-관리자 전용 API 외에는 다른 사용자의 위치를 반환하지 않습니다. 기존 평문 위치 컬럼은 서버 시작 시 암호문 컬럼으로 이전하고 평문 값을 비웁니다. 위치 데이터가 이미 있는 기존 DB는 이 마이그레이션 전에 `LOCATION_ENCRYPTION_KEY`를 설정해야 합니다.
+주소만 전달할 때 좌표를 찾지 못하면 `422`를 반환하므로 도로명 주소를 입력하세요. 건물명만으로 검색되지 않는 경우 지도에서 선택한 정확한 주소와 위도·경도를 함께 전달할 수 있습니다. 좌표는 위도와 경도를 모두 보내야 합니다.
 
-기사 앱의 탑승 지도는 로그인한 기사가 본인 운행에 대해 `GET /trips/{trip_id}/boarding-map`을 호출합니다. 응답은 해당 버스 배정 학생과 연결된 보호자 위치를 포함하며, 서버에서 복호화한 주소·좌표를 반환합니다. 좌표가 없는 보호자는 지도 위치 목록에서 제외됩니다. 다른 기사의 운행 ID를 지정하면 `404`를 반환합니다. 앱은 각 학생의 `guardian_locations`에서 위도·경도가 모두 있는 항목을 지도 마커로 표시해야 합니다.
+관리자 전용 API 외에는 다른 사용자의 위치를 반환하지 않습니다. 서버 시작 시 `students`에 `address_encrypted`, `latitude_encrypted`, `longitude_encrypted` 컬럼을 추가하고, 위치가 없는 자녀에게 연결된 첫 보호자(`guardians.id` 최소)의 기존 `users` 암호문 좌표·주소를 복사한 뒤 `users`의 `latitude`, `longitude`, `latitude_encrypted`, `longitude_encrypted` 컬럼을 삭제합니다. 삭제는 되돌릴 수 없으므로 배포 전에 DB를 백업하세요. `users.address_encrypted`는 유지하지만 더 이상 사용하지 않습니다.
+
+기사 앱의 탑승 지도는 로그인한 기사가 본인 운행에 대해 `GET /trips/{trip_id}/boarding-map`을 호출합니다. 응답은 해당 버스 배정 학생과 연결된 자녀 위치를 포함하며, 서버에서 복호화한 주소·좌표를 반환합니다. 위치가 없는 학생은 `location`이 `null`입니다. 다른 기사의 운행 ID를 지정하면 `404`를 반환합니다. 앱은 각 학생의 `location`에 위도·경도가 모두 있을 때 지도 마커로 표시해야 합니다.
 
 
 운행 시작 직후 취소할 때는 `DELETE /trips/{trip_id}`를 호출합니다. 로그인한 기사의 운행이어야 하며, 사진 처리나 이벤트 기록이 시작된 운행은 취소할 수 없습니다.
+
+미하차 의심(`MISSED`) 운행을 종료할 때는 `POST /trips/{trip_id}/confirm`에 차량 내부 안전 확인(`safety_checked: true`, 시뮬레이션 운행은 `simulation_mode: true`)과 함께 확인 사유 `note`(앱은 `reason`으로 전송해도 동일하게 처리)를 보내야 합니다. 열린 경고는 이 사유와 함께 해결 처리되며, `note`가 없으면 `409`를 반환합니다.
 
 
 ## 미하차 긴급 푸시 알림
@@ -149,4 +151,3 @@ DARK_BRIGHTNESS_THRESHOLD=60
 - 문서를 추가·수정하면 다음 검색 때 **바뀐 조각만** 새로 임베딩해 `rag_index.json`에 더합니다 (무료 한도 초과(429) 시 자동 재시도).
 
 - `02_미하차_대응수칙.md`는 공식 매뉴얼 근거와 서비스 운영 규칙을 항목마다 `[근거: …]`로 구분합니다. 기관 자체 매뉴얼이 있으면 그 PDF를 넣고, 충돌하는 항목은 기관 매뉴얼에 맞춰 고치세요.
-
