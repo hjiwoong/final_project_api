@@ -1,17 +1,15 @@
-import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from core.security import require_admin, require_admin_header_or_query
 from database.db_connection import get_db
 from models.models import BoardingEvent, EventType
 from services import event_bus
+from services.event_images import event_image_response
 from services.serializers import event_to_dict, image_available
-from fastapi import Response
-from models.models import EventImage
 
 router = APIRouter(tags=["이벤트"])
 
@@ -56,25 +54,7 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
 @router.get("/events/{event_id}/image", dependencies=[Depends(require_admin_header_or_query)])
 def get_event_image(event_id: int, db: Session = Depends(get_db)):
     e = get_event_or_404(db, event_id)
-
-    # 사진 보관 기간 확인
-    if e.image_expires_at and datetime.now() >= e.image_expires_at:
-        raise HTTPException(410, "사진 보관 기간이 만료되었습니다.")
-
-    # 1. 공통 MySQL에서 사진 조회
-    saved_image = db.get(EventImage, event_id)
-
-    if saved_image:
-        return Response(
-            content=saved_image.image_data,
-            media_type=saved_image.content_type,
-        )
-
-    # 2. 기존 로컬 사진 조회
-    if e.image_path and os.path.exists(e.image_path):
-        return FileResponse(e.image_path)
-
-    raise HTTPException(410, "사진 파일을 찾을 수 없습니다.")
+    return event_image_response(e, db)
 
 
 @router.get("/stream/events", dependencies=[Depends(require_admin_header_or_query)])
