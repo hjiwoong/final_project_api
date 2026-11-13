@@ -4,17 +4,18 @@ from fastapi import (
     APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile,
 )
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.security import require_admin
 from database.db_connection import get_db
 from models.models import (
     Alert, AlertStatus,
-    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod, Guardian,
-    EventType, EventImage, Student, Trip, TripResult, TripStatus, User,
+    Attendance, Bus, BusStudent, BoardingEvent, ConfirmMethod,
+    EventType, EventImage, Student, Trip, TripResult, TripSchedule, TripStatus, User,
+    TripStudentAttendance,
 )
-from services.location_crypto import decrypt_coordinate_value, decrypt_location_value
+from routers.location import student_location
 from services import agent_service, event_bus, llm_service, notifier, storage
 from services.detector import detect_people, low_conf_count
 from services.judge import judge
@@ -28,12 +29,17 @@ router = APIRouter(prefix="/trips", tags=["운행"], dependencies=[Depends(requi
 class TripStart(BaseModel):
     bus_id: int
     simulation_mode: bool = False
+    schedule_id: int | None = None
 
 
 class ConfirmBody(BaseModel):
     method: ConfirmMethod = ConfirmMethod.BUTTON
     safety_checked: bool = False
     simulation_mode: bool = False
+    note: str | None = Field(
+        default=None, max_length=500,
+        validation_alias=AliasChoices("note", "reason"),   # 앱은 reason 으로 전송
+    )   # 미하차 의심 경고 해결 사유
 
 
 # ---------- helpers ----------
@@ -91,18 +97,31 @@ async def run_detector(data: bytes, mock_count, mock_low_conf, default_count: in
 
 # ---------- 운행 시작 / 조회 ----------
 @router.post("", status_code=201)
-def start_trip(body: TripStart, me: User = Depends(require_admin), db: Session = Depends(get_db)):
+def start_trip(
+    body: TripStart,
+    background_tasks: BackgroundTasks,
+    me: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """운행 시작: trips 레코드 생성 (탑승 예정 인원 = 배정 - 오늘 결석)"""
     bus = db.get(Bus, body.bus_id)
     if not bus:
         raise HTTPException(404, "버스를 찾을 수 없습니다")
+
     running = (
         db.query(Trip)
-        .filter(Trip.bus_id == body.bus_id, Trip.status == TripStatus.IN_PROGRESS)
+        .filter(
+            Trip.bus_id == body.bus_id,
+            Trip.status == TripStatus.IN_PROGRESS
+        )
         .first()
     )
+
     if running:
-        raise HTTPException(409, f"이미 진행 중인 운행이 있습니다 (trip_id={running.id})")
+        raise HTTPException(
+            409,
+            f"이미 진행 중인 운행이 있습니다 (trip_id={running.id})"
+        )
 
     t = Trip(
         bus_id=bus.id,
@@ -110,9 +129,64 @@ def start_trip(body: TripStart, me: User = Depends(require_admin), db: Session =
         expected_count=expected_students(db, bus.id),
         simulation_mode=body.simulation_mode,
     )
+
+    # 운행 시간표로 시작한 경우: 오늘·같은 버스·아직 시작 안 한 시간표인지 확인
+    schedule = None
+    if body.schedule_id is not None:
+        schedule = db.get(TripSchedule, body.schedule_id)
+
+        if schedule is None:
+            raise HTTPException(404, "운행 시간표를 찾을 수 없습니다.")
+
+        if schedule.bus_id != body.bus_id:
+            raise HTTPException(400, "버스와 운행 시간표가 일치하지 않습니다.")
+
+        if schedule.service_date != date.today():
+            raise HTTPException(400, "오늘 날짜의 운행 시간표만 시작할 수 있습니다.")
+
+        if schedule.trip_id is not None:
+            raise HTTPException(409, "이미 시작된 운행 시간표입니다.")
+
+    # 학생별 승하차 확인 기록 생성 (오늘 결석 학생 제외)
+    student_ids = [
+        row[0]
+        for row in db.query(BusStudent.student_id).filter(BusStudent.bus_id == bus.id)
+    ]
+    absent_ids = set()
+    if student_ids:
+        absent_ids = {
+            row[0]
+            for row in db.query(Attendance.student_id).filter(
+                Attendance.student_id.in_(student_ids),
+                Attendance.date == date.today(),
+                Attendance.is_absent.is_(True),
+            )
+        }
+    t.student_attendances = [
+        TripStudentAttendance(student_id=student_id)
+        for student_id in student_ids
+        if student_id not in absent_ids
+    ]
     db.add(t)
+    db.flush()
+    if schedule is not None:
+        schedule.trip_id = t.id
+
+    # 추가: 운행 시작 알림 생성
+    notification_ids = notifier.create_trip_notifications(
+        db, t, "STARTED"
+    )
+
     db.commit()
     db.refresh(t)
+
+    # 추가: DB 저장 성공 후 학부모에게 FCM 푸시 전송
+    if notification_ids:
+        background_tasks.add_task(
+            notifier.send_trip_pushes,
+            notification_ids,
+        )
+
     return trip_to_dict(t)
 
 
@@ -135,6 +209,8 @@ def list_trips(
     status: TripStatus | None = None,
     result: TripResult | None = None,
     bus_id: int | None = None,
+    driver_id: int | None = None,
+    search: str | None = None,
     simulation_mode: bool | None = None,
     from_: datetime | None = Query(None, alias="from"),
     to: datetime | None = None,
@@ -143,6 +219,17 @@ def list_trips(
     db: Session = Depends(get_db),
 ):
     q = db.query(Trip)
+    if search and search.strip():
+        keyword = f"%{search.strip()}%"
+        q = (
+            q.join(Trip.bus)
+            .outerjoin(User, Trip.driver_id == User.id)
+            .filter(
+                (Bus.name.ilike(keyword)) |
+                (Bus.plate_no.ilike(keyword)) |
+                (User.name.ilike(keyword))
+            )
+        )
     if simulation_mode is not None:
         q = q.filter(Trip.simulation_mode == simulation_mode)
     if status:
@@ -151,6 +238,8 @@ def list_trips(
         q = q.filter(Trip.result == result)
     if bus_id:
         q = q.filter(Trip.bus_id == bus_id)
+    if driver_id is not None:
+        q = q.filter(Trip.driver_id == driver_id)
     if from_:
         q = q.filter(Trip.started_at >= from_)
     if to:
@@ -167,6 +256,22 @@ def get_trip(trip_id: int, db: Session = Depends(get_db)):
     return {
         **trip_to_dict(t),
         "events": [event_to_dict(e) for e in t.events],
+        "student_attendances": [
+            {
+                "student_id": attendance.student_id,
+                "student_name": attendance.student.name,
+                "class_name": attendance.student.class_name,
+                "boarding_confirmed_at": attendance.boarding_confirmed_at,
+                "alighting_confirmed_at": attendance.alighting_confirmed_at,
+            }
+            for attendance in sorted(
+                t.student_attendances,
+                key=lambda item: (
+                    item.student.name if item.student else "",
+                    item.student_id,
+                ),
+            )
+        ],
         "open_alerts": [alert_to_dict(a) for a in notifier.open_alerts(db, t.id)],
     }
 
@@ -224,27 +329,6 @@ def trip_boarding_map(
         )
         .all()
     }
-    guardian_rows = (
-        db.query(Guardian.student_id, User)
-        .join(User, User.id == Guardian.user_id)
-        .filter(Guardian.student_id.in_(student_ids))
-        .order_by(Guardian.id)
-        .all()
-    )
-    locations_by_student: dict[int, list[dict]] = {
-        student_id: [] for student_id in student_ids
-    }
-    for student_id, guardian in guardian_rows:
-        if guardian.latitude_encrypted is None or guardian.longitude_encrypted is None:
-            continue
-        location = {
-            "latitude": decrypt_coordinate_value(guardian.latitude_encrypted),
-            "longitude": decrypt_coordinate_value(guardian.longitude_encrypted),
-        }
-        if guardian.address_encrypted is not None:
-            location["address"] = decrypt_location_value(guardian.address_encrypted)
-        locations_by_student[student_id].append(location)
-
     return {
         "trip_id": trip.id,
         "students": [
@@ -254,7 +338,7 @@ def trip_boarding_map(
                 "class_name": student.class_name,
                 "is_absent": student.id in absences,
                 "bus_name": trip.bus.name if trip.bus else None,
-                "guardian_locations": locations_by_student[student.id],
+                "location": student_location(student),
             }
             for student in students
         ],
@@ -436,8 +520,14 @@ async def dropoff_photo(
 
 # ---------- 운행 종료 ----------
 @router.post("/{trip_id}/confirm")
-def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db)):
-    """하차 확인 후 운행 종료. 결과가 OK 가 아니면 409"""
+def confirm_trip(
+    trip_id: int,
+    body: ConfirmBody,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """하차 확인 후 운행 종료.
+    결과가 OK 가 아니면 미해결 경고를 사유(note)와 함께 해결 처리해야 종료된다. 종료 시 보호자에게 알림."""
     t = get_trip_or_404(db, trip_id)
     if t.status == TripStatus.CLOSED:
         raise HTTPException(409, "이미 종료된 운행입니다")
@@ -466,21 +556,24 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
             detail="승차 사진과 종점 사진이 모두 등록되어야 운행을 종료할 수 있습니다."
         )
 
+    resolved_alerts: list[Alert] = []
     if t.result != TripResult.OK:
-        unresolved_alert = (
-            db.query(Alert)
-            .filter(
-                Alert.trip_id == trip_id,
-                Alert.status != AlertStatus.RESOLVED
-            )
-            .first()
-        )
-
-        if unresolved_alert:
-            raise HTTPException(
-                status_code=409,
-                detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다."
-            )
+        unresolved = notifier.open_alerts(db, trip_id)
+        if unresolved:
+            note = (body.note or "").strip()
+            if not note:
+                raise HTTPException(
+                    status_code=409,
+                    detail="미해결 경고가 남아 있어 운행을 종료할 수 없습니다. 미하차 확인 사유를 함께 입력하세요."
+                )
+            # 안전 확인(또는 시뮬레이션)은 위에서 이미 검증했으므로 사유와 함께 경고를 해결 처리
+            now = datetime.now()
+            for a in unresolved:
+                a.status = AlertStatus.RESOLVED
+                a.note = note
+                a.acked_at = a.acked_at or now
+                a.resolved_at = now
+            resolved_alerts = unresolved
 
     # 결과가 OK 이거나, 미하차 의심 경고가 모두 해결된 경우 종료 허용
     # (이전 코드는 이 부분이 if 안에 있어서 결과가 OK 인 정상 운행이 종료되지 않았음)
@@ -488,7 +581,18 @@ def confirm_trip(trip_id: int, body: ConfirmBody, db: Session = Depends(get_db))
     t.confirm_method = body.method
     # 시뮬레이션 여부는 운행 시작 시 결정하며 종료 시 변경하지 않는다.
     t.ended_at = datetime.now()
+
+    # 운행 종료 알림 생성 (보호자) - 커밋과 같은 트랜잭션
+    notification_ids = notifier.create_trip_notifications(db, t, "ENDED")
     db.commit()
+
+    # DB 저장 성공 후 학부모에게 FCM 푸시 전송
+    if notification_ids:
+        background_tasks.add_task(notifier.send_trip_pushes, notification_ids)
+
+    for a in resolved_alerts:
+        db.refresh(a)
+        event_bus.publish("alert", alert_to_dict(a))
 
     return {
         "id": t.id,

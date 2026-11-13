@@ -1,3 +1,4 @@
+
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +22,11 @@ def notification_to_dict(n: Notification) -> dict:
         "sent_at": n.sent_at,
         "read_at": n.read_at,
         "is_read": n.read_at is not None,
+
+        # 신규: 알림 분류 및 운행 정보
+        "trip_id": n.trip_id,
+        "category": n.category,
+        "event_type": n.event_type,
     }
 
 
@@ -38,6 +44,7 @@ def my_notifications(
     q = base.filter(Notification.read_at.is_(None)) if unread_only else base
     total = q.count()
     rows = q.order_by(Notification.id.desc()).offset(offset).limit(limit).all()
+
     return {
         "items": [notification_to_dict(n) for n in rows],
         "total": total,
@@ -52,9 +59,12 @@ def read_notification(
     db: Session = Depends(get_db),
 ):
     n = db.get(Notification, notification_id)
-    if not n or n.user_id != me.id:          # 남의 알림은 존재 여부도 숨김
+    if not n or n.user_id != me.id:
+        # 남의 알림은 존재 여부도 숨김
         raise HTTPException(404, "알림을 찾을 수 없습니다")
+
     if n.read_at is None:
         n.read_at = datetime.now()
         db.commit()
+
     return {"id": n.id, "read_at": n.read_at}

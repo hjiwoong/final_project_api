@@ -363,7 +363,11 @@
       <a
         class="overview-kpi ${kind}"
         href="${href}"
-        ${href === '#/trips' ? `data-dash-trip-link="true" ${label === '미하차 의심' ? 'data-trip-result="MISSED"' : ''}` : ''}
+        ${href === '#/trips'
+          ? `data-dash-trip-link="true"
+             ${label === '미하차 의심' ? 'data-trip-result="MISSED"' : ''}
+             ${label === '운행 중인 버스' ? 'data-trip-status="IN_PROGRESS"' : ''}`
+          : ''}
         ${label === '미해결 경고' ? 'data-dash-unresolved="true"' : ''}
       >
         <div class="overview-kpi-top">
@@ -377,7 +381,7 @@
     `;
     const tripStatus = (t) => `${badge(TRIP_STATUS, t.status)} ${badge(RESULT, t.result)}`;
     const dateLabel = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
-    const scope = `${dashSimulation ? '시뮬레이션' : '실제 운행'} · ${periodText}`;
+    const scope = `${dashSimulation ? '시연 모드' : '실제 운행'} · ${periodText}`;
     return {
       html: `<div class="dashboard-v2">
         <header class="dashboard-hero">
@@ -551,7 +555,9 @@
                 ${fmtTripDate(t.started_at || t.scheduled_start_at)}
                 ${fmtTripTime(t.started_at || t.scheduled_start_at)}
                 →
-                ${fmtTripTime(t.ended_at || t.scheduled_end_at)}
+                ${t.status === 'IN_PROGRESS'
+                  ? '운행 중'
+                  : fmtTripTime(t.ended_at || t.scheduled_end_at)}
               </span>
             </div>
           </div>
@@ -651,7 +657,7 @@
               <button type="button" class="${!tripsState.simulation ? 'active' : ''}"
                 data-act="trips-simulation" data-simulation="false">실제 운행</button>
               <button type="button" class="${tripsState.simulation ? 'active' : ''}"
-                data-act="trips-simulation" data-simulation="true">시뮬레이션</button>
+                data-act="trips-simulation" data-simulation="true">시연 모드</button>
             </div>
           </div>
   
@@ -731,7 +737,9 @@
           <div class="trip-record-list">
             ${rows || '<div class="empty">조건에 맞는 운행 기록이 없습니다.</div>'}
           </div>
-          ${pager(data.total, tripsState.offset, TRIP_LIMIT, 'trips')}
+          ${data.total > TRIP_LIMIT
+            ? pager(data.total, tripsState.offset, TRIP_LIMIT, 'trips')
+            : ''}
         </section>
       `
     };
@@ -1088,7 +1096,7 @@
               ${badge(TRIP_STATUS, t.status)}
               ${badge(RESULT, t.result)}
               ${t.simulation_mode === true
-                ? '<span class="badge warn">시뮬레이션</span>'
+                ? '<span class="badge warn">시연 모드</span>'
                 : ''}
             </div>
           </header>
@@ -1121,11 +1129,7 @@
               </div>
               <div>
                 <dt>차량번호</dt>
-                <dd>
-                  <a href="#/trips/${t.id}">
-                    ${esc(t.plate_no || '차량번호 미등록')} →
-                  </a>
-                </dd>
+                <dd>${esc(t.plate_no || '차량번호 미등록')}</dd>
               </div>
               <div>
                 <dt>담당 기사</dt>
@@ -1312,7 +1316,7 @@
       {
         label: '미해결 경고',
         value: unresolvedTotal,
-        note: `${alertsState.simulation ? '시뮬레이션' : '실제 운행'} · 미확인 + 확인함`,
+        note: `${alertsState.simulation ? '시연 모드' : '실제 운행'} · 미확인 + 확인함`,
         type: 'open',
         icon: '!'
       },
@@ -1335,7 +1339,7 @@
 
     const alertListDescription =
       `${alertStatusLabel} 경고 ${num(data.total)}건 · ` +
-      `${alertsState.simulation ? '시뮬레이션' : '실제 운행'}`;
+      `${alertsState.simulation ? '시연 모드' : '실제 운행'}`;
 
     const rows = data.items.map(a => `
      <tr class="${
@@ -1395,7 +1399,7 @@
               </p>
             </div>
             <span class="badge muted">
-              ${alertsState.simulation ? '시뮬레이션' : '실제 운행'}
+              ${alertsState.simulation ? '시연 모드' : '실제 운행'}
             </span>
           </header>
   
@@ -1434,7 +1438,7 @@
                   class="${alertsState.simulation ? 'active' : ''}"
                   data-act="alerts-simulation"
                   data-simulation="true">
-                  시뮬레이션
+                  시연 모드
                 </button>
               </div>
             </div>
@@ -1473,7 +1477,7 @@
                         <div class="alert-empty-state">
                           <div class="alert-empty-icon">✓</div>
                           <strong>조건에 맞는 경고가 없습니다.</strong>
-                          <p>다른 처리 상태를 선택하거나 시뮬레이션 경고를 확인해 보세요.</p>
+                          <p>다른 처리 상태를 선택하거나 시연 모드의 경고를 확인해 보세요.</p>
                         </div>
                       </td>
                     </tr>
@@ -1482,7 +1486,7 @@
                 </table>
                 </div>
   
-            ${data.total > 0
+            ${data.total > ALERT_LIMIT
               ? pager(
                   data.total,
                   alertsState.offset,
@@ -1548,7 +1552,7 @@
           <select name="resolve_mode" required>
             <option value="">해결 방식 선택</option>
             <option value="safety">실제 차량 내부 안전 확인 완료</option>
-            <option value="simulation">시뮬레이션 테스트 (실제 안전 확인 아님)</option>
+            <option value="simulation">시연 모드 경고 처리 (실제 안전 확인 아님)</option>
           </select>
         </label>
   
@@ -1797,7 +1801,7 @@
           </div>
           <div class="req-card-info">
             <div class="req-card-title">
-              <h3>${esc(r.child_name)}</h3>
+              <h3>신청 학생: ${esc(r.child_name)}</h3>
               ${badge(REQ_STATUS, r.status)}
             </div>
             <p class="req-child-meta">
@@ -2167,13 +2171,13 @@
     </details>
   </section>
   <section class="parent-location-panel" aria-labelledby="parent-location-heading">
-    <h2 id="parent-location-heading">보호자 주소 확인</h2>
-    <p class="muted-text">선택한 보호자의 저장된 주소와 좌표를 조회합니다. 이 정보는 이 화면에서만 표시됩니다.</p>
+    <h2 id="parent-location-heading">자녀 주소 확인</h2>
+    <p class="muted-text">선택한 학생의 저장된 승하차 주소와 좌표를 조회합니다. 이 정보는 이 화면에서만 표시됩니다.</p>
     <div class="parent-location-controls">
-      <label for="parent-location-user">보호자 계정
+      <label for="parent-location-user">학생
         <select id="parent-location-user">
-          <option value="">보호자를 선택하세요</option>
-          ${options(parents, (u) => u.id, (u) => `${u.name} ${u.email}`)}
+          <option value="">학생을 선택하세요</option>
+          ${options(allStudents, (s) => s.id, (s) => `${s.name}${s.class_name ? ` (${s.class_name})` : ''}`)}
         </select>
       </label>
       <button type="button" class="btn" data-act="parent-location-view">주소 조회</button>
@@ -2210,6 +2214,7 @@
   // 페이지: 버스·배정
   // ======================================================================
   async function pageBuses() {
+
     const [buses, users, students] = await Promise.all([api('/web/buses'), api('/web/users'), api('/web/students')]);
     window.busEditData = buses;
     const admins = users.filter((u) => u.role === 'ADMIN');
@@ -2304,12 +2309,8 @@
         </td>
     
         <td>
-          <button
-            type="button"
-            class="btn"
-            data-act="bus-edit"
-            data-bus-id="${Number(b.id)}"
-          >수정</button>
+          <button type="button" class="btn" data-act="bus-edit" data-bus-id="${Number(b.id)}">수정</button>
+          <button type="button" class="btn" data-act="bus-delete" data-bus-id="${Number(b.id)}">삭제</button>
         </td>
       </tr>
     `).join('');
@@ -2571,12 +2572,30 @@
       });
       if (!students.length) throw new Error('등록할 학생을 입력하세요');
       if (students.length > 500) throw new Error('한 번에 500명까지 등록할 수 있습니다');
-      const r = await api('/web/students/bulk', { method: 'POST', body: { students } });
+      const r = await api('/web/students/bulk', {
+        method: 'POST',
+        body: { students }
+      });
+
+      rosterState.q = '';
+      rosterState.class_name = '';
+      rosterState.offset = 0;
       return `${r.created}명 등록` + (r.skipped.length ? `, ${r.skipped.length}명은 이미 있어 건너뜀 (${r.skipped.slice(0, 3).map((x) => x.name).join(', ')}${r.skipped.length > 3 ? ' 외' : ''})` : '');
     },
     async rosterEdit(f) {
-      await api(`/web/students/${f.id}`, { method: 'PUT', body: { name: f.name, class_name: f.class_name || null } });
+      await api(`/web/students/${f.id}`, {
+        method: 'PUT',
+        body: {
+          name: f.name,
+          class_name: f.class_name || null
+        }
+      });
+
       rosterState.edit = null;
+      rosterState.q = '';
+      rosterState.class_name = '';
+      rosterState.offset = 0;
+
       return '학생 정보를 수정했습니다';
     },
     async approve(f) {
@@ -2595,7 +2614,7 @@
       const simulation = f.resolve_mode === 'simulation';
 
       const note = simulation
-        ? `[시뮬레이션] ${f.note || 'AI 생성 이미지 기반 테스트. 실제 차량 내부 안전 확인 없음.'}`
+        ? `[시연 모드] ${f.note || 'AI 생성 이미지 기반 테스트. 실제 차량 내부 안전 확인 없음.'}`
         : f.note || '실제 차량 내부 안전 확인 완료';
 
       await api(`/alerts/${f.id}/resolve`, {
@@ -2672,11 +2691,13 @@
 
     if (tripLink) {
       tripsState.simulation = dashSimulation;
-
-      if (tripLink.dataset.tripResult === 'MISSED') {
-        tripsState.result = 'MISSED';
-      }
-
+      tripsState.result = tripLink.dataset.tripResult || '';
+      tripsState.status = tripLink.dataset.tripStatus || '';
+      tripsState.bus_id = '';
+      tripsState.driver_id = '';
+      tripsState.search = '';
+      tripsState.from = '';
+      tripsState.to = '';
       tripsState.offset = 0;
     }
 
@@ -2695,7 +2716,7 @@
       const select = $('#parent-location-user');
       const userId = Number(select && select.value);
       if (!Number.isInteger(userId) || userId < 1) {
-        toast('보호자 계정을 선택하세요.', 'error');
+        toast('학생을 선택하세요.', 'error');
         return;
       }
       const result = $('#parent-location-result');
@@ -2704,12 +2725,12 @@
       result.textContent = '주소를 조회하고 있습니다.';
       el.disabled = true;
       try {
-        const location = await api(`/web/users/${encodeURIComponent(userId)}/location`);
+        const location = await api(`/web/students/${encodeURIComponent(userId)}/location`);
         if ($('#parent-location-user')?.value === String(userId)) renderParentLocation(location);
       } catch (err) {
         if (err.message !== 'unauthorized' && $('#parent-location-user')?.value === String(userId)) {
           result.textContent = err.message.includes('(404)')
-            ? '주소 정보를 찾을 수 없습니다. 대상이 보호자 계정인지 확인하세요.'
+            ? '주소 정보를 찾을 수 없습니다. 학생이 존재하는지 확인하세요.'
             : '주소 조회에 실패했습니다. 잠시 후 다시 시도하세요.';
         }
       } finally {
@@ -2759,17 +2780,34 @@
       let body, msg;
       if (act === 'roster-del') {
         body = { ids: [Number(el.dataset.id)] };
-        msg = `${el.dataset.name} 학생을 삭제할까요?`;
+        msg = `[학생 삭제]\n${el.dataset.name} 학생을 삭제하시겠습니까?`;
+
       } else if (act === 'roster-del-sel') {
-        const ids = [...document.querySelectorAll('input[data-sel]:checked')].map((c) => Number(c.value));
-        if (!ids.length) { toast('삭제할 학생을 먼저 선택하세요', 'error'); return; }
+        const ids = [...document.querySelectorAll('input[data-sel]:checked')]
+          .map((c) => Number(c.value));
+
+        if (!ids.length) {
+          toast('삭제할 학생을 먼저 선택하세요', 'error');
+          return;
+        }
+
         body = { ids };
-        msg = `선택한 ${ids.length}명을 삭제할까요?`;
+        msg = `[선택 학생 삭제]\n선택한 학생 ${ids.length}명을 삭제하시겠습니까?`;
+
       } else {
         body = { class_name: el.dataset.class };
-        msg = `${el.dataset.class} 반 학생 ${el.dataset.total}명을 모두 삭제(졸업 처리)할까요?`;
+        msg = `[반 전체 삭제 · 졸업 처리]\n${el.dataset.class} 반 학생 ${el.dataset.total}명을 모두 삭제하시겠습니까?`;
       }
-      if (!window.confirm(`${msg}\n보호자 연결, 버스 배정, 출결 기록도 함께 삭제되며 되돌릴 수 없습니다.`)) return;
+
+      const warning =
+        `\n\n삭제 시 다음 정보도 함께 삭제됩니다.\n` +
+        `- 해당 학생의 보호자 연결\n` +
+        `- 버스 배정 정보\n` +
+        `- 학생 출결 기록\n\n` +
+        `삭제한 정보는 복구할 수 없습니다.\n` +
+        `정말 삭제하시겠습니까?`;
+
+      if (!window.confirm(msg + warning)) return;
       el.disabled = true;
       try {
         const r = await api('/web/students/bulk-delete', { method: 'POST', body });
@@ -2792,6 +2830,63 @@
       if (title) title.textContent = '버스 등록';
       if (submitButton) submitButton.textContent = '버스 등록';
       if (cancelButton) cancelButton.hidden = true;
+    } else if (act === 'bus-delete') {
+      const busId = Number(el.dataset.busId);
+      if (!Number.isSafeInteger(busId) || busId <= 0) {
+        toast('버스 정보가 올바르지 않습니다', 'error');
+        return;
+      }
+
+      el.disabled = true;   // 확인 창이 떠 있는 동안 중복 클릭 방지
+      try {
+        const preview = await api(`/web/buses/${busId}/delete-preview`);
+
+        const message = [
+          `버스: ${preview.bus_name}`,
+          `차량번호: ${preview.plate_no}`,
+          '',
+          `운행 기록: ${preview.trips}건`,
+          `경고 기록: ${preview.alerts}건`,
+          `검출 기록: ${preview.events}건`,
+          `알림 기록: ${preview.notifications}건`,
+          `학생 배정: ${preview.assignments}건`,
+          '',
+          preview.real_trips > 0
+            ? '실제 운행 기록이 있어 삭제할 수 없습니다.'
+            : '삭제 대상 확인이 완료되었습니다.'
+        ].join('\n');
+
+        window.alert(message);
+        if (preview.real_trips > 0) return;
+
+        const enteredPlate = window.prompt('삭제하려면 차량번호를 정확히 입력하세요.', '');
+        if (enteredPlate === null) return;
+        if (enteredPlate.trim() !== preview.plate_no) {
+          window.alert('차량번호가 일치하지 않습니다.');
+          return;
+        }
+
+        if (!window.confirm(
+          `${preview.bus_name} 버스와 관련 시연 기록을 영구 삭제하시겠습니까?\n삭제 후 복구할 수 없습니다.`
+        )) return;
+
+        await api(
+          `/web/buses/${busId}?plate_no=${encodeURIComponent(preview.plate_no)}`,
+          { method: 'DELETE' }
+        );
+
+        // 수정 중이던 버스를 지웠다면 수정 상태도 해제
+        if (Number(window.editingBusId) === busId) window.editingBusId = null;
+
+        toast('버스와 관련 기록을 삭제했습니다');
+        await route();
+      } catch (err) {
+        if (err.message !== 'unauthorized') {
+          toast(err.message || '삭제 대상 정보를 불러오지 못했습니다.', 'error');
+        }
+      } finally {
+        if (el.isConnected) el.disabled = false;
+      }
     } else if (act === 'bus-edit') {
       const busId = Number(el.dataset.busId);
       const bus = window.busEditData?.find((b) => Number(b.id) === busId);
@@ -2864,7 +2959,7 @@
       return;
     }
 
-    // main: 보호자를 바꾸면 이전 주소 조회 결과를 지움
+    // main: 학생을 바꾸면 이전 주소 조회 결과를 지움
     if (e.target.id === 'parent-location-user') {
       const result = $('#parent-location-result');
       if (result) {

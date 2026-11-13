@@ -3,6 +3,9 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from services.trip_delay_service import check_delayed_trips
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,11 +20,13 @@ from services.account_deletions import delete_expired_accounts
 from services.detector import MODE as DETECTOR_MODE
 from routers import (
     account, alert, boarding_event, bus, bus_student, chat, child_request, guardian, location,
-    notification, parent_bus, rag, social, stats, student, student_admin, trip, user,
+    notification, parent_bus, rag, social, stats, student, student_admin, trip, user,trip_schedule
 )
 from services import agent_service, chat_service, gemini_client, llm_service, notifier, rag_service
 
 logger = logging.getLogger(__name__)
+delay_scheduler = BackgroundScheduler(timezone="Asia/Seoul")
+
 
 
 async def account_deletion_worker():
@@ -40,11 +45,31 @@ async def account_deletion_worker():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()   # 서버 시작 시 MySQL 에 테이블 생성
+    init_db()  # 서버 시작 시 MySQL 테이블 생성
+
+    # 기존 계정 삭제 작업
     worker = asyncio.create_task(account_deletion_worker())
+
+    # 신규: 운행 시작 10분 지연 자동 확인
+    delay_scheduler.add_job(
+        check_delayed_trips,
+        "interval",
+        minutes=1,
+        id="check_delayed_trips",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    delay_scheduler.start()
+
     try:
         yield
     finally:
+        # 신규 스케줄러 종료
+        if delay_scheduler.running:
+            delay_scheduler.shutdown(wait=False)
+
+        # 기존 계정 삭제 작업 종료
         worker.cancel()
         try:
             await worker
@@ -71,6 +96,7 @@ app.include_router(guardian.router, dependencies=[Depends(require_admin)])
 app.include_router(location.router)
 app.include_router(parent_bus.router)   # 학부모: 내 자녀 배정 버스 / 운행 상태
 app.include_router(trip.router)
+app.include_router(trip_schedule.router)
 app.include_router(boarding_event.router)
 app.include_router(alert.router)
 app.include_router(notification.router)

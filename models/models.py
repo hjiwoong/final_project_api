@@ -81,10 +81,6 @@ class User(Base):
         String(20), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
     )
     push_token = Column(String(512), nullable=True)
-    # 주소·좌표는 Fernet 암호문으로 저장 (services/location_crypto.py)
-    address_encrypted = Column(String(1024), nullable=True)
-    latitude_encrypted = Column(String(255), nullable=True)
-    longitude_encrypted = Column(String(255), nullable=True)
     deletion_requested_at = Column(DateTime, nullable=True, index=True)   # 계정 삭제 유예 시작 시각
     created_at = Column(DateTime, default=datetime.now)
 
@@ -100,11 +96,16 @@ class Student(Base):
     name = Column(String(100), nullable=False)
     class_name = Column(String(50), nullable=True)      # 예: 1-2
     consent_at = Column(DateTime, nullable=True)        # 보호자 동의 시각
+    # 자녀 승하차 주소·좌표는 Fernet 암호문으로 저장 (services/location_crypto.py)
+    address_encrypted = Column(String(1024), nullable=True)
+    latitude_encrypted = Column(String(255), nullable=True)
+    longitude_encrypted = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     guardians = relationship("Guardian", back_populates="student")
     bus_students = relationship("BusStudent", back_populates="student")
     attendances = relationship("Attendance", back_populates="student")
+    trip_attendances = relationship("TripStudentAttendance", back_populates="student")
 
 
 class Guardian(Base):
@@ -197,6 +198,35 @@ class BusStudent(Base):
     bus = relationship("Bus", back_populates="bus_students")
     student = relationship("Student", back_populates="bus_students")
 
+class TripSchedule(Base):
+    """날짜별 버스 운행 예정 시각 및 지연 알림 상태"""
+    __tablename__ = "trip_schedules"
+    __table_args__ = (
+        UniqueConstraint("bus_id", "service_date", name="uq_trip_schedule_bus_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    bus_id = Column(
+        Integer,
+        ForeignKey("buses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    service_date = Column(Date, nullable=False)
+    scheduled_at = Column(DateTime, nullable=False)
+
+    # 신규: 이 시간표로 시작한 실제 운행
+    trip_id = Column(
+        Integer,
+        ForeignKey("trips.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
+
+    delayed_notified_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
 
 # ---------- 운행 ----------
 class Trip(Base):
@@ -223,6 +253,28 @@ class Trip(Base):
     driver = relationship("User")
     events = relationship("BoardingEvent", back_populates="trip")
     alerts = relationship("Alert", back_populates="trip")
+    student_attendances = relationship(
+        "TripStudentAttendance", back_populates="trip", cascade="all, delete-orphan"
+    )
+
+
+class TripStudentAttendance(Base):
+    """자녀별 운행 승·하차 확인 기록"""
+    __tablename__ = "trip_student_attendances"
+    __table_args__ = (
+        UniqueConstraint("trip_id", "student_id", name="uq_trip_student_attendance"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trip_id = Column(Integer, ForeignKey("trips.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
+    boarding_confirmed_at = Column(DateTime, nullable=True)
+    boarding_confirmed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    alighting_confirmed_at = Column(DateTime, nullable=True)
+    alighting_confirmed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    trip = relationship("Trip", back_populates="student_attendances")
+    student = relationship("Student", back_populates="trip_attendances")
 
 
 class BoardingEvent(Base):
@@ -275,17 +327,39 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    alert_id = Column(Integer, ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    alert_id = Column(
+        Integer,
+        ForeignKey("alerts.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # 신규: 운행 알림 구분
+    trip_id = Column(
+        Integer,
+        ForeignKey("trips.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    category = Column(
+        String(20),
+        nullable=False,
+        default="URGENT",
+        server_default="URGENT",
+    )
+    event_type = Column(String(30), nullable=True)
 
     title = Column(String(255), nullable=False)
     body = Column(Text, nullable=True)
-    sent_at = Column(DateTimeMs, default=datetime.now)      # KPI: 알림 발송(기록) 시각
+    sent_at = Column(DateTimeMs, default=datetime.now)
     read_at = Column(DateTime, nullable=True)
 
     alert = relationship("Alert", back_populates="notifications")
     user = relationship("User", back_populates="notifications")
-
 
 class PushToken(Base):
     """기기별 FCM 토큰. 같은 기기의 토큰은 계정 간 이동할 수 있다."""
