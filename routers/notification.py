@@ -33,6 +33,8 @@ def notification_to_dict(n: Notification) -> dict:
 @router.get("")
 def my_notifications(
     unread_only: bool = False,
+    category: str | None = Query(None, max_length=20),
+    event_type: str | None = Query(None, max_length=30),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     me: User = Depends(get_current_user),
@@ -41,7 +43,14 @@ def my_notifications(
     base = db.query(Notification).filter(Notification.user_id == me.id)
     unread_count = base.filter(Notification.read_at.is_(None)).count()
 
-    q = base.filter(Notification.read_at.is_(None)) if unread_only else base
+    q = base
+    if category:
+        q = q.filter(Notification.category == category)
+    if event_type:
+        q = q.filter(Notification.event_type == event_type)
+    if unread_only:
+        q = q.filter(Notification.read_at.is_(None))
+
     total = q.count()
     rows = q.order_by(Notification.id.desc()).offset(offset).limit(limit).all()
 

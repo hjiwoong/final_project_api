@@ -122,11 +122,17 @@ def _geocode_candidates(query: str, count: int) -> list[dict]:
     return candidates
 
 
-def _place_candidates(query: str, count: int) -> list[dict]:
-    """장소명(예: 광운대학교) 검색. 네이버 개발자센터 '지역 검색' API 사용, 키가 없으면 건너뜀."""
+def _place_candidates(query: str, count: int, *, strict: bool = False) -> list[dict]:
+    """장소명/주소 검색. strict=False면 키가 없거나 호출이 실패해도 건너뜁니다."""
     client_id = os.getenv("NAVER_SEARCH_CLIENT_ID")
     client_secret = os.getenv("NAVER_SEARCH_CLIENT_SECRET")
     if not client_id or not client_secret:
+        if strict:
+            raise HTTPException(
+                503,
+                "주소 검색 서비스가 설정되지 않았습니다 "
+                "(NAVER_SEARCH_CLIENT_ID/SECRET 확인)",
+            )
         return []
     try:
         response = requests.get(
@@ -140,11 +146,30 @@ def _place_candidates(query: str, count: int) -> list[dict]:
         )
         response.raise_for_status()
         items = response.json().get("items", [])
-    except (requests.RequestException, ValueError, AttributeError):
+    except requests.RequestException as exc:
+        if strict:
+            raise HTTPException(
+                502, "네이버 지역 검색 서비스에 연결할 수 없습니다"
+            ) from exc
+        return []
+    except (ValueError, AttributeError) as exc:
+        if strict:
+            raise HTTPException(
+                502, "네이버 지역 검색 서비스의 응답을 읽을 수 없습니다"
+            ) from exc
+        return []
+
+    if not isinstance(items, list):
+        if strict:
+            raise HTTPException(
+                502, "네이버 지역 검색 서비스의 응답 형식이 올바르지 않습니다"
+            )
         return []
 
     results = []
     for item in items:
+        if not isinstance(item, dict):
+            continue
         name = re.sub(r"<[^>]+>", "", item.get("title") or "").strip()
         road_address = item.get("roadAddress") or None
         jibun_address = item.get("address") or None
@@ -171,15 +196,44 @@ def _place_candidates(query: str, count: int) -> list[dict]:
 
 
 def _geocode(address: str) -> tuple[float, float]:
-    candidates = _geocode_candidates(address, 1)
-    if not candidates:
-        raise HTTPException(
-            422,
-            "입력한 주소의 좌표를 찾을 수 없습니다. 건물명만 입력하지 말고 "
-            "도로명 또는 지번 주소(예: 서울특별시 중구 세종대로 110)를 입력하거나 "
-            "지도에서 위치를 선택해 주세요",
-        )
-    return candidates[0]["latitude"], candidates[0]["longitude"]
+    geocode_error = None
+    try:
+        candidates = _geocode_candidates(address, 1)
+        if candidates:
+            return candidates[0]["latitude"], candidates[0]["longitude"]
+    except HTTPException as exc:
+        geocode_error = exc
+
+    def normalize(value: str | None) -> str:
+        return re.sub(r"\s+", "", value or "").casefold()
+
+    normalized_address = normalize(address)
+    search_client_id = os.getenv("NAVER_SEARCH_CLIENT_ID")
+    search_client_secret = os.getenv("NAVER_SEARCH_CLIENT_SECRET")
+    search_is_configured = bool(search_client_id and search_client_secret)
+    search_credentials_provided = bool(search_client_id or search_client_secret)
+    if geocode_error and geocode_error.status_code == 503 and not search_is_configured:
+        raise geocode_error
+    search_candidates = _place_candidates(
+        address,
+        SEARCH_CANDIDATE_LIMIT,
+        strict=search_credentials_provided,
+    )
+    for candidate in search_candidates:
+        if normalized_address in {
+            normalize(candidate["road_address"]),
+            normalize(candidate["jibun_address"]),
+        }:
+            return candidate["latitude"], candidate["longitude"]
+
+    if geocode_error and geocode_error.status_code != 503:
+        raise geocode_error
+    raise HTTPException(
+        422,
+        "입력한 주소의 좌표를 찾을 수 없습니다. 건물명만 입력하지 말고 "
+        "도로명 또는 지번 주소(예: 서울특별시 중구 세종대로 110)를 입력하거나 "
+        "지도에서 위치를 선택해 주세요",
+    )
 
 
 def _get_my_child(db: Session, me: User, student_id: int) -> Student:

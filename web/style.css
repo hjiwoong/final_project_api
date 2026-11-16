@@ -55,6 +55,7 @@ h2 { font-size: 1.05rem; margin: 0 0 .75rem; font-weight: 600; }
 .live.on .dot { background: #4cc58a; }
 .live.off .dot { background: var(--red); }
 .linkbtn { background: none; border: 0; color: #e8edf2; text-decoration: underline; padding: 0; cursor: pointer; font: inherit; }
+.rail-foot .linkbtn { display: block; margin-top: .55rem; }
 .main { min-width: 0; }
 #view { padding: 1.75rem 2rem 4rem; max-width: 1100px; outline: none; }
 .pagehead { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
@@ -145,6 +146,58 @@ textarea { min-height: 5rem; resize: vertical; }
 .forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem; }
 .forms form { border-top: 3px solid var(--ink); padding-top: .9rem; }
 .form-error { color: var(--red); font-weight: 600; margin: 0 0 .75rem; }
+
+/* ---------- password change dialog ---------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, .58);
+}
+.password-dialog {
+  position: relative;
+  width: min(100%, 460px);
+  max-height: min(90vh, 760px);
+  overflow: auto;
+  padding: 2rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 5px solid var(--yellow);
+  border-radius: 10px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .24);
+}
+.password-dialog h2 { margin: 0; font-size: 1.35rem; }
+.password-dialog .password-dialog-description { margin: .5rem 0 1.25rem; color: var(--muted); }
+.password-dialog-kicker { margin: 0 0 .35rem; color: var(--slate); font-size: .78rem; font-weight: 700; letter-spacing: .08em; }
+.password-dialog-close {
+  position: absolute;
+  top: .65rem;
+  right: .8rem;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.6rem;
+  cursor: pointer;
+}
+.password-dialog-actions { display: flex; justify-content: flex-end; gap: .65rem; margin-top: 1.25rem; }
+.password-success-icon {
+  display: grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin-bottom: 1.1rem;
+  border-radius: 50%;
+  background: var(--green-bg);
+  color: var(--green);
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+.password-login-button { width: 100%; margin-top: .5rem; }
 
 /* ---------- detail pages ---------- */
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1rem 1.5rem; margin: 0; padding: 1rem 1.25rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
@@ -2159,6 +2212,33 @@ input[type="checkbox"] { display: inline-block; width: 1.1rem; height: 1.1rem; m
   color: #475569;
   font-size: 12px;
   font-weight: 700;
+}
+
+.bus-list-controls,
+.bus-schedule-date-form,
+.bus-schedule-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bus-list-controls {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.bus-schedule-date-form label {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bus-schedule-date-form input,
+.bus-schedule-form input[type="time"] {
+  min-width: 120px;
+  padding: 7px 8px;
+  border: 1px solid #dfe5ee;
+  border-radius: 7px;
 }
 
 /* 버스 목록 테이블 */

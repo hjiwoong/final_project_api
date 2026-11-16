@@ -48,6 +48,7 @@
     <div class="rail-foot">
       <p class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="live-text">연결 중</span></p>
       <p class="who"><span id="me-name"></span></p>
+      <button type="button" class="linkbtn" id="open-password-change">비밀번호 변경</button>
       <button type="button" class="linkbtn" id="logout">로그아웃</button>
     </div>
   </aside>
@@ -56,6 +57,32 @@
     <div id="banner" class="banner" role="alert" hidden></div>
     <main id="view" tabindex="-1"></main>
   </div>
+</div>
+
+<div id="password-modal" class="modal-backdrop" hidden>
+  <section class="password-dialog" role="dialog" aria-modal="true" aria-labelledby="password-dialog-title">
+    <button type="button" class="password-dialog-close" id="close-password-change" aria-label="닫기">×</button>
+    <form id="password-change-form">
+      <p class="password-dialog-kicker">계정 보안</p>
+      <h2 id="password-dialog-title">비밀번호 변경</h2>
+      <p class="password-dialog-description">현재 비밀번호를 확인하고 새 비밀번호를 설정하세요.</p>
+      <label>현재 비밀번호<input name="current_password" type="password" autocomplete="current-password" required></label>
+      <label>새 비밀번호<input name="new_password" type="password" autocomplete="new-password" required></label>
+      <label>새 비밀번호 확인<input name="confirm_password" type="password" autocomplete="new-password" required></label>
+      <p id="password-change-error" class="form-error" role="alert" hidden></p>
+      <div class="password-dialog-actions">
+        <button type="button" class="btn" id="cancel-password-change">취소</button>
+        <button type="submit" class="btn primary">변경하기</button>
+      </div>
+    </form>
+    <div id="password-change-success" hidden>
+      <div class="password-success-icon" aria-hidden="true">✓</div>
+      <p class="password-dialog-kicker">변경 완료</p>
+      <h2>비밀번호가 변경되었습니다</h2>
+      <p class="password-dialog-description">현재 세션에서 로그아웃되었습니다. 새 비밀번호로 다시 로그인해 주세요.</p>
+      <button type="button" class="btn primary password-login-button" id="password-change-login">로그인 화면으로</button>
+    </div>
+  </section>
 </div>
 
 <div id="toasts" role="status" aria-live="polite"></div>

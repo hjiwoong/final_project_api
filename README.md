@@ -26,9 +26,13 @@
 
 연결 해제는 보호자-자녀 관계만 제거하며, 학생 정보와 다른 보호자의 연결 및 요청 처리 이력은 유지합니다.
 
+## 출발 예정 시각 및 미출발 알림
+
+기사 앱에서는 **배정된 버스** 카드에 오늘 출발 예정 시각을 표시하고, 관리자는 웹의 **버스·배정** 화면에서 운행 날짜별 출발 예정 시각을 등록·수정할 수 있습니다. 보호자 홈의 버스 정보에도 예정 시각이 표시됩니다. 운행을 시작할 때 시간표 ID를 함께 전송하며, 서버가 예정 시각부터 5분이 지난 시점에도 출발이 확인되지 않으면 해당 버스의 보호자와 전체 관리자(기사)에게 `NOT_STARTED` 운행 알림과 푸시를 한 번 발송합니다. 시간표 조회는 `GET /trip-schedules?service_date=YYYY-MM-DD`, 생성·수정은 `PUT /trip-schedules/{bus_id}` (`service_date`, `start_time`)를 사용하며, 운행 시작 후에는 시간표를 수정할 수 없습니다.
+
 ## 자녀 통학 위치 API
 
-자녀(students)에 도로명 주소와 WGS84 위도·경도(소수점 7자리)를 저장합니다. 주소만 보내면 서버가 네이버 클라우드 플랫폼 Geocoding API로 좌표를 조회합니다. 지도에서 위치를 보정한 경우에는 주소와 보정한 `latitude`, `longitude`를 함께 보내면 해당 좌표를 사용합니다. 주소와 좌표는 Fernet 인증 암호화로 DB에 암호문으로 저장되고, 본인 또는 관리자 권한 API 응답에서만 복호화됩니다. 서버 환경변수 `LOCATION_ENCRYPTION_KEY`에는 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` 명령으로 생성한 키를 비밀 저장소에 보관해 설정하세요. 키 분실 시 저장된 위치를 복구할 수 없으므로 암호화된 DB 백업과 별도로 안전한 백업이 필요합니다. 키가 누락되거나 형식이 잘못되면 서버 시작이 중단됩니다. 네이버 API 키는 서버 환경변수 `NAVER_MAPS_CLIENT_ID`, `NAVER_MAPS_CLIENT_SECRET`에 설정하며 클라이언트에 전달하지 않습니다.
+자녀(students)에 도로명 주소와 WGS84 위도·경도(소수점 7자리)를 저장합니다. 주소만 보내면 서버가 네이버 클라우드 플랫폼 Geocoding API로 좌표를 조회하고, 네이버 검색 API의 지역 검색 결과도 주소 후보에 함께 포함합니다. Geocoding API에서 좌표를 찾지 못하거나 사용할 수 없을 때는 검색 API 결과 중 입력한 도로명/지번 주소와 정확히 일치하는 결과를 좌표 조회에 사용할 수 있습니다. 지도에서 위치를 보정한 경우에는 주소와 보정한 `latitude`, `longitude`를 함께 보내면 해당 좌표를 사용합니다. 주소와 좌표는 Fernet 인증 암호화로 DB에 암호문으로 저장되고, 본인 또는 관리자 권한 API 응답에서만 복호화됩니다. 서버 환경변수 `LOCATION_ENCRYPTION_KEY`에는 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` 명령으로 생성한 키를 비밀 저장소에 보관해 설정하세요. 키 분실 시 저장된 위치를 복구할 수 없으므로 암호화된 DB 백업과 별도로 안전한 백업이 필요합니다. 키가 누락되거나 형식이 잘못되면 서버 시작이 중단됩니다. 네이버 지도 API 키는 `NAVER_MAPS_CLIENT_ID`, `NAVER_MAPS_CLIENT_SECRET`, 지역 검색 API 키는 `NAVER_SEARCH_CLIENT_ID`, `NAVER_SEARCH_CLIENT_SECRET`에 설정하며 모두 서버 환경변수로 관리하고 클라이언트에 전달하지 않습니다.
 
 | Method | Path | Description |
 |---|---|---|

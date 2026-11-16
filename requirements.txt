@@ -8,6 +8,7 @@ python-multipart
 bcrypt
 pydantic[email]
 pyjwt
+tzdata
 google-auth
 requests
 firebase-admin>=6.5
