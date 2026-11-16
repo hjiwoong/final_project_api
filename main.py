@@ -21,7 +21,7 @@ from database.orm import init_db
 from services.account_deletions import delete_expired_accounts
 from services.detector import MODE as DETECTOR_MODE
 from routers import (
-    account, alert, boarding_event, bus, bus_student, chat, child_request, guardian, location,
+    alert, boarding_event, bus, bus_student, chat, child_request, guardian, location,
     notification, parent_bus, rag, social, stats, student, student_admin, trip, user,trip_schedule
 )
 from services import agent_service, chat_service, gemini_client, llm_service, notifier, rag_service
@@ -102,7 +102,6 @@ app.add_middleware(
 )
 
 app.include_router(user.router)
-app.include_router(account.router)
 app.include_router(bus.router, dependencies=[Depends(require_admin)])
 app.include_router(student.router)
 app.include_router(bus_student.router, dependencies=[Depends(require_admin)])

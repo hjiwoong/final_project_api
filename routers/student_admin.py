@@ -8,7 +8,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import func, or_, update
+from sqlalchemy import or_, update
 from sqlalchemy.orm import Session
 
 from core.security import require_admin
