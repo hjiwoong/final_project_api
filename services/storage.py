@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
-RETENTION_DAYS = int(os.getenv("IMAGE_RETENTION_DAYS", "7"))
+RETENTION_DAYS = int(os.getenv("IMAGE_RETENTION_DAYS", "14"))
 
 
 def save_image(trip_id: int, kind: str, filename: str | None, data: bytes) -> str:
