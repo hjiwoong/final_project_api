@@ -18,7 +18,13 @@ DATABASE_URL = os.getenv("DATABASE_URL") or (
     f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
 )
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, echo=False)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    pool_timeout=30,
+    echo=False,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
