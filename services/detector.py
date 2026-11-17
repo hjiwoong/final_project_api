@@ -34,7 +34,7 @@ def _build_model_candidates() -> list[str]:
     else:
         weights_dir = BASE_DIR / "weights"
         if weights_dir.exists():
-            preferred = weights_dir / "bus_person_k2_more_26s_1105_0855.pt"
+            preferred = weights_dir / "bus_person_k5_final_26s_1109_0926.pt"
             configured = [
                 str(path)
                 for path in (
@@ -45,7 +45,7 @@ def _build_model_candidates() -> list[str]:
                 if path.is_file()
             ]
         else:
-            configured = ["weights/bus_person_k2_more_26s_1105_0855.pt"]
+            configured = ["weights/bus_person_k5_final_26s_1109_0926.pt"]
 
     seen: set[str] = set()
     ordered: list[str] = []
