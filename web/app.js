@@ -42,6 +42,13 @@
   const num = (v) => (v == null ? '-' : v);
   const localIso = (d) =>
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const localDate = (d = new Date()) =>
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  let busScheduleDate = localDate();
+  const timeInputValue = (value) => {
+    const match = String(value || '').match(/(?:T|\s)(\d{2}:\d{2})/);
+    return match ? match[1] : '';
+  };
 
   const RESULT = { OK: ['정상', 'ok'], MISSED: ['미하차 의심', 'bad'], NEEDS_CHECK: ['확인 필요', 'warn'], PENDING: ['대기', 'muted'] };
   const TRIP_STATUS = {
@@ -57,12 +64,12 @@
   };
 
   // ---------- API ----------
-  async function api(path, { method = 'GET', body } = {}) {
+  async function api(path, { method = 'GET', body, handleUnauthorized = true } = {}) {
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const res = await fetch(path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
-    if (res.status === 401 && token && path !== '/web/login') {
+    if (res.status === 401 && token && path !== '/web/login' && handleUnauthorized) {
       logout('로그인이 만료되었습니다. 다시 로그인하세요.');
       throw new Error('unauthorized');
     }
@@ -107,6 +114,7 @@
     offset: 0,
     simulation: false
   };
+  const missedDeparturesState = { offset: 0 };
   const reqState = { status: 'PENDING', offset: 0 };
   const REQ_LIMIT = 10;
   const rosterState = { q: '', class_name: '', offset: 0, edit: null };
@@ -114,6 +122,7 @@
   const REQ_STATUS = { PENDING: ['승인 대기', 'warn'], APPROVED: ['승인됨', 'ok'], REJECTED: ['거절됨', 'muted'] };
   const TRIP_LIMIT = 15;
   const ALERT_LIMIT = 15;
+  const MISSED_DEPARTURE_LIMIT = 10;
 
   const pager = (total, offset, limit, key) => {
     const totalPages = Math.ceil(total / limit);
@@ -1252,9 +1261,23 @@
       return items;
     }
 
+    async function fetchMissedDepartures() {
+      try {
+        return await api('/me/notifications?' + new URLSearchParams({
+          category: 'TRIP',
+          event_type: 'NOT_STARTED',
+          limit: String(MISSED_DEPARTURE_LIMIT),
+          offset: String(missedDeparturesState.offset)
+        }));
+      } catch (error) {
+        if (error.message === 'unauthorized') throw error;
+        return { items: [], total: 0, error: error.message };
+      }
+    }
+
     const mode = String(alertsState.simulation);
 
-    const [data, summary, urgentSummary] =
+    const [data, summary, urgentSummary, missedDepartures] =
       await Promise.all([
         alertsState.status === 'UNRESOLVED'
           ? Promise.all([
@@ -1286,7 +1309,9 @@
           limit: '1',
           level: 'URGENT',
           simulation_mode: mode
-        }))
+        })),
+
+        fetchMissedDepartures()
       ]);
 
     const unresolvedTotal = await Promise.all([
@@ -1388,6 +1413,18 @@
       </tr>
     `).join('');
 
+    const missedDepartureRows = (missedDepartures.items || []).map(n => `
+      <tr>
+        <td>${badge({ NOT_STARTED: ['미출발', 'warn'] }, 'NOT_STARTED')}</td>
+        <td class="alert-message-cell">
+          <strong>${esc(n.title)}</strong>
+          <span class="alert-message-description">${esc(n.body || '')}</span>
+        </td>
+        <td>${fmtTime(n.sent_at)}</td>
+        <td>${n.is_read ? '확인함' : '미확인'}</td>
+      </tr>
+    `).join('');
+
     return {
       html: `
         <div class="alerts-page">
@@ -1419,6 +1456,48 @@
               </div>
             `).join('')}
           </div>
+
+          <section class="alert-list-section missed-departure-section">
+            <div class="alert-list-heading">
+              <div>
+                <h2>버스 미출발 알림</h2>
+                <p>${missedDepartures.error
+                  ? '미출발 알림 정보를 불러오지 못했습니다.'
+                  : `예정 시각에서 5분 이상 출발이 확인되지 않은 알림 ${num(missedDepartures.total)}건`}</p>
+              </div>
+            </div>
+            ${missedDepartures.error
+              ? errorBox(`미출발 알림을 불러오지 못했습니다: ${missedDepartures.error}`)
+              : `
+                <div class="tablewrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>유형</th>
+                        <th>알림 내용</th>
+                        <th>발생 시간</th>
+                        <th>확인 상태</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${missedDepartureRows || `
+                        <tr>
+                          <td colspan="4" class="empty">현재 미출발 알림이 없습니다.</td>
+                        </tr>
+                      `}
+                    </tbody>
+                  </table>
+                </div>
+                ${missedDepartures.total > MISSED_DEPARTURE_LIMIT
+                  ? pager(
+                      missedDepartures.total,
+                      missedDeparturesState.offset,
+                      MISSED_DEPARTURE_LIMIT,
+                      'missed-departures'
+                    )
+                  : ''}
+              `}
+          </section>
   
           <section class="alert-list-section">
             <div class="alert-list-heading">
@@ -2215,7 +2294,15 @@
   // ======================================================================
   async function pageBuses() {
 
-    const [buses, users, students] = await Promise.all([api('/web/buses'), api('/web/users'), api('/web/students')]);
+    const [buses, users, students, schedules] = await Promise.all([
+      api('/web/buses'),
+      api('/web/users'),
+      api('/web/students'),
+      api(`/trip-schedules?service_date=${encodeURIComponent(busScheduleDate)}`)
+    ]);
+    const schedulesByBus = new Map(
+      schedules.map((schedule) => [Number(schedule.bus_id), schedule])
+    );
     window.busEditData = buses;
     const admins = users.filter((u) => u.role === 'ADMIN');
     const driverName = (id) =>
@@ -2254,13 +2341,33 @@
     const unassignedStudents = students.filter(
       (s) => s && s.id != null && !assignedIds.has(Number(s.id))
     ).length;
-    const rows = buses.map((b, i) => `
+    const rows = buses.map((b, i) => {
+      const schedule = schedulesByBus.get(Number(b.id));
+      const started = schedule?.trip_id != null;
+      return `
       <tr>
         <td>${esc(b.name)}</td>
         <td>${esc(b.plate_no)}</td>
         <td>${esc(driverName(b.driver_id))}</td>
     
         <td class="num">${assigned[i].length}</td>
+        <td>
+          <form data-form="bus-schedule" class="bus-schedule-form">
+            <input type="hidden" name="bus_id" value="${Number(b.id)}">
+            <input type="hidden" name="service_date" value="${esc(busScheduleDate)}">
+            <input
+              name="start_time"
+              type="time"
+              value="${esc(timeInputValue(schedule?.scheduled_at))}"
+              aria-label="${esc(b.name)} 출발 예정 시각"
+              ${started ? 'disabled' : ''}
+              required
+            >
+            <button type="submit" class="btn small" ${started ? 'disabled' : ''}>
+              ${started ? '운행 시작됨' : '시각 저장'}
+            </button>
+          </form>
+        </td>
     
         <td class="bus-student-cell">
           ${assigned[i].length
@@ -2313,7 +2420,8 @@
           <button type="button" class="btn" data-act="bus-delete" data-bus-id="${Number(b.id)}">삭제</button>
         </td>
       </tr>
-    `).join('');
+      `;
+    }).join('');
 
     const assignedByBus = Object.fromEntries(
       buses.map((b, i) => [
@@ -2375,11 +2483,16 @@
         <div class="bus-list-heading">
           <div>
             <h2>버스별 학생 배정 현황</h2>
-            <p>등록된 차량과 탑승 예정 학생을 확인합니다.</p>
+            <p>등록된 차량과 탑승 예정 학생, 출발 예정 시각을 관리합니다.</p>
           </div>
-          <span class="bus-list-count">
-            전체 ${num(totalBuses)}대
-          </span>
+          <div class="bus-list-controls">
+            <form data-form="bus-schedule-date" class="bus-schedule-date-form">
+              <label for="bus-schedule-date">운행 날짜</label>
+              <input id="bus-schedule-date" name="service_date" type="date" value="${esc(busScheduleDate)}" required>
+              <button type="submit" class="btn small">조회</button>
+            </form>
+            <span class="bus-list-count">전체 ${num(totalBuses)}대</span>
+          </div>
         </div>
 
         <div class="tablewrap">
@@ -2390,12 +2503,13 @@
                 <th>차량번호</th>
                 <th>기사</th>
                 <th class="num">학생 수</th>
+                <th>출발 예정 시각</th>
                 <th>탑승 예정 학생</th>
                 <th>관리</th>
               </tr>
             </thead>
             <tbody>
-              ${rows || '<tr><td colspan="6" class="empty">등록된 버스가 없습니다. 아래에서 버스를 등록하세요.</td></tr>'}
+              ${rows || '<tr><td colspan="7" class="empty">등록된 버스가 없습니다. 아래에서 버스를 등록하세요.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -2496,6 +2610,22 @@
   // 폼 처리
   // ======================================================================
   const forms = {
+    'bus-schedule-date': async (data) => {
+      busScheduleDate = data.service_date;
+      return null;
+    },
+
+    'bus-schedule': async (data) => {
+      await api(`/trip-schedules/${Number(data.bus_id)}`, {
+        method: 'PUT',
+        body: {
+          service_date: data.service_date,
+          start_time: `${data.start_time}:00`
+        }
+      });
+      return '출발 예정 시각을 저장했습니다';
+    },
+
     'trip-search': async (data) => {
       tripsState.search = (data.search || '').trim();
       tripsState.offset = 0;
@@ -2761,7 +2891,13 @@
       tripsState.offset = 0;
       route();
     } else if (act === 'page') {
-      ({ trips: tripsState, alerts: alertsState, requests: reqState, roster: rosterState })[el.dataset.key].offset = Number(el.dataset.offset);
+      ({
+        trips: tripsState,
+        alerts: alertsState,
+        requests: reqState,
+        roster: rosterState,
+        'missed-departures': missedDeparturesState
+      })[el.dataset.key].offset = Number(el.dataset.offset);
       route();
     } else if (act === 'ack') {
       el.disabled = true;
@@ -3170,6 +3306,72 @@
     } finally {
       btn.disabled = false;
     }
+  });
+  const passwordModal = $('#password-modal');
+  const passwordForm = $('#password-change-form');
+  const passwordError = $('#password-change-error');
+  const passwordSuccess = $('#password-change-success');
+
+  function closePasswordModal() {
+    passwordModal.hidden = true;
+    passwordForm.hidden = false;
+    passwordSuccess.hidden = true;
+    $('#close-password-change').hidden = false;
+    passwordForm.reset();
+    passwordError.hidden = true;
+    passwordError.textContent = '';
+  }
+
+  $('#open-password-change').addEventListener('click', () => {
+    passwordModal.hidden = false;
+    passwordForm.hidden = false;
+    passwordSuccess.hidden = true;
+    passwordError.hidden = true;
+    passwordError.textContent = '';
+    $('#close-password-change').hidden = false;
+    passwordForm.elements.current_password.focus();
+  });
+  $('#close-password-change').addEventListener('click', closePasswordModal);
+  $('#cancel-password-change').addEventListener('click', closePasswordModal);
+  passwordForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = Object.fromEntries(new FormData(passwordForm));
+    const submit = passwordForm.querySelector('button[type="submit"]');
+    if (form.new_password !== form.confirm_password) {
+      passwordError.textContent = '새 비밀번호가 일치하지 않습니다.';
+      passwordError.hidden = false;
+      return;
+    }
+
+    submit.disabled = true;
+    passwordError.hidden = true;
+    try {
+      await api('/me/password', {
+        method: 'PUT',
+        body: {
+          current_password: form.current_password,
+          new_password: form.new_password
+        },
+        handleUnauthorized: false
+      });
+      passwordForm.hidden = true;
+      passwordSuccess.hidden = false;
+      $('#close-password-change').hidden = true;
+      logout();
+      passwordModal.hidden = false;
+      $('#password-change-login').focus();
+    } catch (error) {
+      passwordError.textContent = error.message === 'unauthorized'
+        ? '로그인이 만료되었습니다. 다시 로그인하세요.'
+        : error.message;
+      passwordError.hidden = false;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  $('#password-change-login').addEventListener('click', () => {
+    closePasswordModal();
+    $('#login-form').elements.email.focus();
   });
   $('#logout').addEventListener('click', () => logout());
 

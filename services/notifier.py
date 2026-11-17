@@ -131,7 +131,7 @@ def _credentials_path() -> str:
     return (
         os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE")
         or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        or r"D:\secrets\final-project-b66de-firebase-adminsdk-fbsvc-c2cb0dc867.json"
+        or r"D:\projects\final_project_api\secrets\final-project-b66de-firebase-adminsdk-fbsvc-c2cb0dc867.json"
     )
 
 

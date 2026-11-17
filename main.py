@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     # 기존 계정 삭제 작업
     worker = asyncio.create_task(account_deletion_worker())
 
-    # 신규: 운행 시작 10분 지연 자동 확인
+    # 운행 예정 시각 5분 경과 후 미출발 자동 확인
     delay_scheduler.add_job(
         check_delayed_trips,
         "interval",

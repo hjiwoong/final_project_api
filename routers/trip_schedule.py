@@ -1,4 +1,3 @@
-
 """날짜별 운행 시간표 등록 및 조회 API."""
 
 from datetime import date, datetime, time
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 from database.db_connection import get_db
 from models.models import Bus, TripSchedule, User
 from core.security import require_admin
+from core.time import now_kst_naive
 
 router = APIRouter(prefix="/trip-schedules", tags=["Trip Schedules"])
 
@@ -20,13 +20,14 @@ class TripScheduleCreate(BaseModel):
     start_time: time
 
 
-class TripScheduleSave(BaseModel):
+class TripScheduleUpdate(BaseModel):
     """앱(기사) 시간표 저장: PUT /trip-schedules/{bus_id}"""
     service_date: date
     start_time: time
 
 
 def _schedule_dict(s: TripSchedule) -> dict:
+    """시간표 응답 공통 형식 (앱이 trip_id 로 '이미 시작한 운행' 여부를 판단)"""
     return {
         "id": s.id,
         "bus_id": s.bus_id,
@@ -50,7 +51,7 @@ def create_trip_schedule(
 
     scheduled_at = datetime.combine(body.service_date, body.start_time)
 
-    if scheduled_at <= datetime.now():
+    if scheduled_at <= now_kst_naive():
         raise HTTPException(
             status_code=400,
             detail="현재 시각 이후의 운행 시간만 등록할 수 있습니다.",
@@ -85,19 +86,20 @@ def create_trip_schedule(
 
 
 @router.put("/{bus_id}")
-def save_trip_schedule(
+def upsert_trip_schedule(
     bus_id: int,
-    body: TripScheduleSave,
+    body: TripScheduleUpdate,
     me: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """버스·날짜별 출발 예정 시각 저장 (없으면 등록, 있으면 수정).
+    """배정 버스의 출발 시각을 등록하거나 아직 시작 전인 시간표를 수정한다.
     이미 그 시간표로 운행을 시작했으면 409."""
-    if db.get(Bus, bus_id) is None:
+    bus = db.get(Bus, bus_id)
+    if bus is None:
         raise HTTPException(status_code=404, detail="버스를 찾을 수 없습니다.")
 
     scheduled_at = datetime.combine(body.service_date, body.start_time)
-    if scheduled_at <= datetime.now():
+    if scheduled_at <= now_kst_naive():
         raise HTTPException(
             status_code=400,
             detail="현재 시각 이후의 운행 시간만 등록할 수 있습니다.",
@@ -109,11 +111,9 @@ def save_trip_schedule(
             TripSchedule.bus_id == bus_id,
             TripSchedule.service_date == body.service_date,
         )
+        .with_for_update()   # 동시에 저장해도 같은 시간표를 두 번 만들지 않게
         .first()
     )
-    if schedule is not None and schedule.trip_id is not None:
-        raise HTTPException(status_code=409, detail="이미 운행을 시작해 변경할 수 없습니다.")
-
     if schedule is None:
         schedule = TripSchedule(
             bus_id=bus_id,
@@ -122,6 +122,11 @@ def save_trip_schedule(
         )
         db.add(schedule)
     else:
+        if schedule.trip_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="이미 운행을 시작한 시간표는 수정할 수 없습니다.",
+            )
         schedule.scheduled_at = scheduled_at
         schedule.delayed_notified_at = None   # 시각이 바뀌면 지연 알림을 다시 판단
 

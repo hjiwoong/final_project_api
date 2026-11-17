@@ -1,10 +1,14 @@
 
+from datetime import date
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from core.security import require_parent
 from database.db_connection import get_db
-from models.models import Bus, BusStudent, Guardian, Trip, TripStatus, User
+from models.models import (
+    Bus, BusStudent, Guardian, Trip, TripSchedule, TripStatus, User,
+)
 
 router = APIRouter(prefix="/me", tags=["학부모-버스운행"])
 
@@ -55,6 +59,14 @@ def get_parent_bus_status(
     )
 
     result = []
+    schedules = {
+        schedule.bus_id: schedule
+        for schedule in (
+            db.query(TripSchedule)
+            .filter(TripSchedule.service_date == date.today())
+            .all()
+        )
+    }
 
     for bus in buses:
         # 해당 버스의 현재 진행 중인 운행 조회
@@ -77,6 +89,11 @@ def get_parent_bus_status(
             "started_at": (
                 trip.started_at.isoformat()
                 if trip and trip.started_at
+                else None
+            ),
+            "scheduled_at": (
+                schedules[bus.id].scheduled_at.isoformat()
+                if bus.id in schedules
                 else None
             ),
         })
