@@ -1,4 +1,3 @@
-
 """날짜별 운행 시간표 등록 및 조회 API."""
 
 from datetime import date, datetime, time
@@ -22,8 +21,21 @@ class TripScheduleCreate(BaseModel):
 
 
 class TripScheduleUpdate(BaseModel):
+    """앱(기사) 시간표 저장: PUT /trip-schedules/{bus_id}"""
     service_date: date
     start_time: time
+
+
+def _schedule_dict(s: TripSchedule) -> dict:
+    """시간표 응답 공통 형식 (앱이 trip_id 로 '이미 시작한 운행' 여부를 판단)"""
+    return {
+        "id": s.id,
+        "bus_id": s.bus_id,
+        "service_date": s.service_date,
+        "scheduled_at": s.scheduled_at,
+        "trip_id": s.trip_id,
+        "delayed_notified_at": s.delayed_notified_at,
+    }
 
 
 @router.post("", status_code=201)
@@ -70,13 +82,7 @@ def create_trip_schedule(
     db.commit()
     db.refresh(schedule)
 
-    return {
-        "id": schedule.id,
-        "bus_id": schedule.bus_id,
-        "service_date": schedule.service_date,
-        "scheduled_at": schedule.scheduled_at,
-        "delayed_notified_at": schedule.delayed_notified_at,
-    }
+    return _schedule_dict(schedule)
 
 
 @router.put("/{bus_id}")
@@ -86,7 +92,8 @@ def upsert_trip_schedule(
     me: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """배정 버스의 출발 시각을 등록하거나 아직 시작 전인 시간표를 수정한다."""
+    """배정 버스의 출발 시각을 등록하거나 아직 시작 전인 시간표를 수정한다.
+    이미 그 시간표로 운행을 시작했으면 409."""
     bus = db.get(Bus, bus_id)
     if bus is None:
         raise HTTPException(status_code=404, detail="버스를 찾을 수 없습니다.")
@@ -104,7 +111,7 @@ def upsert_trip_schedule(
             TripSchedule.bus_id == bus_id,
             TripSchedule.service_date == body.service_date,
         )
-        .with_for_update()
+        .with_for_update()   # 동시에 저장해도 같은 시간표를 두 번 만들지 않게
         .first()
     )
     if schedule is None:
@@ -121,17 +128,11 @@ def upsert_trip_schedule(
                 detail="이미 운행을 시작한 시간표는 수정할 수 없습니다.",
             )
         schedule.scheduled_at = scheduled_at
-        schedule.delayed_notified_at = None
+        schedule.delayed_notified_at = None   # 시각이 바뀌면 지연 알림을 다시 판단
 
     db.commit()
     db.refresh(schedule)
-    return {
-        "id": schedule.id,
-        "bus_id": schedule.bus_id,
-        "service_date": schedule.service_date,
-        "scheduled_at": schedule.scheduled_at,
-        "delayed_notified_at": schedule.delayed_notified_at,
-    }
+    return _schedule_dict(schedule)
 
 
 @router.get("")
@@ -151,14 +152,4 @@ def list_trip_schedules(
         .all()
     )
 
-    return [
-        {
-            "id": s.id,
-            "bus_id": s.bus_id,
-            "service_date": s.service_date,
-            "scheduled_at": s.scheduled_at,
-            "trip_id": s.trip_id,
-            "delayed_notified_at": s.delayed_notified_at,
-        }
-        for s in schedules
-    ]
+    return [_schedule_dict(s) for s in schedules]

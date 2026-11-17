@@ -9,7 +9,7 @@ from database.db_connection import get_db
 from models.models import BoardingEvent, EventType
 from services import event_bus
 from services.event_images import event_image_response
-from services.serializers import event_to_dict, image_available
+from services.serializers import event_to_dict
 
 router = APIRouter(tags=["이벤트"])
 

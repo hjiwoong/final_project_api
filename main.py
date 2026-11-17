@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from services.trip_delay_service import check_delayed_trips
+from services.image_retention import run_purge_job
+from datetime import datetime
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +21,7 @@ from database.orm import init_db
 from services.account_deletions import delete_expired_accounts
 from services.detector import MODE as DETECTOR_MODE
 from routers import (
-    account, alert, boarding_event, bus, bus_student, chat, child_request, guardian, location,
+    alert, boarding_event, bus, bus_student, chat, child_request, guardian, location,
     notification, parent_bus, rag, social, stats, student, student_admin, trip, user,trip_schedule
 )
 from services import agent_service, chat_service, gemini_client, llm_service, notifier, rag_service
@@ -60,6 +62,18 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
+
+    # 보관 기간(IMAGE_RETENTION_DAYS)이 지난 사진 삭제: 시작 직후 1번, 이후 1시간마다
+    delay_scheduler.add_job(
+        run_purge_job,
+        "interval",
+        hours=1,
+        next_run_time=datetime.now(),
+        id="purge_expired_images",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     delay_scheduler.start()
 
     try:
@@ -88,7 +102,6 @@ app.add_middleware(
 )
 
 app.include_router(user.router)
-app.include_router(account.router)
 app.include_router(bus.router, dependencies=[Depends(require_admin)])
 app.include_router(student.router)
 app.include_router(bus_student.router, dependencies=[Depends(require_admin)])

@@ -15,4 +15,5 @@ firebase-admin>=6.5
 google-genai>=1.0      # Gemini (LLM 요약·Agent 안내문·RAG 임베딩)
 pillow                 # 사진 밝기 점검
 pypdf>=4              # RAG: 법령·매뉴얼 PDF 읽기
-
+apscheduler>=3.10        # 운행 시작 지연 알림 스케줄러 (main.py)
+ultralytics==8.4.182     # YOLO 추론. 서버 PC 에 설치된 버전과 같게 고정

@@ -9,7 +9,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON, Boolean, Column, Date, DateTime, Enum, ForeignKey, Integer, String,
-    Text, UniqueConstraint, func,
+    Text, UniqueConstraint,
 )
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import relationship
@@ -369,8 +369,6 @@ class PushToken(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     token = Column(String(512), nullable=False, unique=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-from sqlalchemy import LargeBinary
 
 class EventImage(Base):
     __tablename__ = "event_images"
