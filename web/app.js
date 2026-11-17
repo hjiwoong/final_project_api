@@ -662,12 +662,6 @@
               <h2>운행 기록 목록</h2>
               <p>선택한 조건에 맞는 운행 ${data.total}건</p>
             </div>
-            <div class="seg">
-              <button type="button" class="${!tripsState.simulation ? 'active' : ''}"
-                data-act="trips-simulation" data-simulation="false">실제 운행</button>
-              <button type="button" class="${tripsState.simulation ? 'active' : ''}"
-                data-act="trips-simulation" data-simulation="true">시연 모드</button>
-            </div>
           </div>
   
           <div class="trip-status-tabs" aria-label="운행 상태별 조회">
@@ -1505,21 +1499,6 @@
                 <h2>안전 경고 목록</h2>
                 <p>${esc(alertListDescription)}</p>
               </div>
-  
-              <div class="seg" aria-label="운행 구분">
-                <button type="button"
-                  class="${!alertsState.simulation ? 'active' : ''}"
-                  data-act="alerts-simulation"
-                  data-simulation="false">
-                  실제 운행
-                </button>
-                <button type="button"
-                  class="${alertsState.simulation ? 'active' : ''}"
-                  data-act="alerts-simulation"
-                  data-simulation="true">
-                  시연 모드
-                </button>
-              </div>
             </div>
   
             <div class="filters alert-filters">
@@ -1556,7 +1535,7 @@
                         <div class="alert-empty-state">
                           <div class="alert-empty-icon">✓</div>
                           <strong>조건에 맞는 경고가 없습니다.</strong>
-                          <p>다른 처리 상태를 선택하거나 시연 모드의 경고를 확인해 보세요.</p>
+                          <p>다른 처리 상태를 선택해 보세요.</p>
                         </div>
                       </td>
                     </tr>
@@ -1631,7 +1610,6 @@
           <select name="resolve_mode" required>
             <option value="">해결 방식 선택</option>
             <option value="safety">실제 차량 내부 안전 확인 완료</option>
-            <option value="simulation">시연 모드 경고 처리 (실제 안전 확인 아님)</option>
           </select>
         </label>
   
@@ -2872,14 +2850,6 @@
       route();
     } else if (act === 'dash-sim') {
       dashSimulation = el.dataset.dashSim === 'true';
-      route();
-    } else if (act === 'alerts-simulation') {
-      alertsState.simulation = el.dataset.simulation === 'true';
-      alertsState.offset = 0;
-      route();
-    } else if (act === 'trips-simulation') {
-      tripsState.simulation = el.dataset.simulation === 'true';
-      tripsState.offset = 0;
       route();
     } else if (act === 'trips-status-tab') {
       tripsState.status = el.dataset.status || '';
