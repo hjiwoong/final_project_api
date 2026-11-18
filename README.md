@@ -22,7 +22,7 @@
 |---|---|---|
 | 인원 카운트 정확도 (±1명 이내 사진 비율) | 80% 이상 | 98.5% (Test 66장, 정확히 일치 83.3%) |
 | 미하차 감지 정확도 (사람이 남은 사진에서 경고가 나는 비율) | 90% 이상 | 90.7% (43장 중 39장) |
-| 서버 기능 테스트 | - | 41개 항목 통과 |
+| 서버 기능 테스트 | - | 44개 항목 통과 |
 
 학습·평가 데이터는 아동 사진이나 인터넷 이미지 대신 팀원이 시연 차량에서 직접 촬영한 사진 216장입니다(성인 팀원, 비공개 보관). 놓친 사례는 누운 자세와 아주 어두운 사진이었습니다.
 
@@ -52,7 +52,7 @@
 main.py               앱 생성, 라우터 등록, 스케줄러(미출발 알림·사진 삭제·계정 삭제), /health, /admin 마운트
 core/                 JWT·비밀번호(security.py), 시간대(time.py)
 database/             DB 연결(.env 읽기), 테이블 생성·마이그레이션
-models/models.py      ORM 모델 (16개 테이블)
+models/models.py      ORM 모델 (17개 테이블)
 routers/              API 라우터 (user, bus, student, trip, boarding_event, alert, notification, rag, chat 등)
 services/             인원 감지(detector), 판정(judge), Agent, LLM·RAG·챗봇, 푸시(notifier), 사진 저장·자동 삭제
 knowledge/            RAG 지식 문서 (법령·매뉴얼 PDF, 대응 수칙 .md)
