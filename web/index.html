@@ -8,6 +8,16 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <style>
+    .login-password-wrap { display: block; position: relative; width: 100%; }
+    .login-password-wrap input { width: 100%; box-sizing: border-box; padding-right: 52px; }
+    .login-password-toggle { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: #f1f5f9; cursor: pointer; }
+    .login-password-toggle[hidden] { display: none; }
+    .login-password-toggle:hover { color: #fff; }
+    .login-password-toggle:focus-visible { outline: 2px solid #f6b900; outline-offset: 2px; border-radius: 5px; }
+    .login-password-toggle .login-eye-slash { display: block; }
+    .login-password-toggle[aria-pressed="true"] .login-eye-slash { display: none; }
+  </style>
 </head>
 <body>
 
@@ -26,7 +36,14 @@
     <form id="login-form" class="login-box" autocomplete="on">
       <div class="login-panel-heading"><h2>관리자 로그인</h2><p>관리자 계정으로 로그인하세요.</p></div>
       <label>이메일<input name="email" type="email" autocomplete="username" placeholder="이메일을 입력하세요" required></label>
-      <label>비밀번호<input name="password" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요" required></label>
+      <label>비밀번호
+        <span class="login-password-wrap">
+          <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요" required>
+          <button type="button" class="login-password-toggle" hidden aria-label="비밀번호 표시" aria-pressed="false" aria-controls="login-password">
+            <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="login-eye-slash" d="M3 3l18 18"/></svg>
+          </button>
+        </span>
+      </label>
       <p id="login-error" class="form-error" role="alert" hidden></p>
       <button type="submit" class="btn primary">로그인</button>
       <p class="login-footer">통학버스 안전관리 시스템 · 관리자 전용</p>
@@ -86,6 +103,28 @@
 </div>
 
 <div id="toasts" role="status" aria-live="polite"></div>
+<script>
+  (() => {
+    const input = document.getElementById('login-password');
+    const toggle = document.querySelector('.login-password-toggle');
+    const syncToggle = () => {
+      toggle.hidden = input.value.length === 0;
+      if (toggle.hidden) {
+        input.type = 'password';
+        toggle.setAttribute('aria-pressed', 'false');
+        toggle.setAttribute('aria-label', '비밀번호 표시');
+      }
+    };
+    input.addEventListener('input', syncToggle);
+    syncToggle();
+    toggle.addEventListener('click', () => {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      toggle.setAttribute('aria-pressed', String(show));
+      toggle.setAttribute('aria-label', show ? '비밀번호 숨기기' : '비밀번호 표시');
+    });
+  })();
+</script>
 <script src="app.js"></script>
 </body>
 </html>
