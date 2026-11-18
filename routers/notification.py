@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from core.security import get_current_user
+from core.security import require_terms_agreed
 from database.db_connection import get_db
 from models.models import Notification, User
 
@@ -37,7 +37,7 @@ def my_notifications(
     event_type: str | None = Query(None, max_length=30),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    me: User = Depends(get_current_user),
+    me: User = Depends(require_terms_agreed),
     db: Session = Depends(get_db),
 ):
     base = db.query(Notification).filter(Notification.user_id == me.id)
@@ -64,7 +64,7 @@ def my_notifications(
 @router.post("/{notification_id}/read")
 def read_notification(
     notification_id: int,
-    me: User = Depends(get_current_user),
+    me: User = Depends(require_terms_agreed),
     db: Session = Depends(get_db),
 ):
     n = db.get(Notification, notification_id)

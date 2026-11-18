@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from core.security import require_admin, require_parent
+from core.security import require_admin, require_parent_terms_agreed
 from database.db_connection import get_db
 from routers.location import student_location
 from models.models import (
@@ -57,7 +57,7 @@ def list_students(db: Session = Depends(get_db)):
 @router.get("/me/children")
 def my_children(
     attendance_date: date | None = Query(default=None, alias="date"),
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     """내 자녀의 날짜별 결석 설정과 배정 버스의 실제 운행 상태"""
@@ -175,7 +175,7 @@ def confirm_trip_attendance(
     trip_id: int,
     student_id: int,
     body: TripAttendanceConfirmation,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     """보호자가 자신의 자녀가 해당 운행에서 승차 또는 하차했음을 확인한다."""
@@ -255,7 +255,7 @@ def confirm_trip_attendance(
 
 
 @router.get("/me/buses")
-def my_buses(me: User = Depends(require_parent), db: Session = Depends(get_db)):
+def my_buses(me: User = Depends(require_parent_terms_agreed), db: Session = Depends(get_db)):
     """현재 학부모의 자녀에게 배정된 버스만 조회한다."""
     rows = (
         db.query(Bus.id, Bus.name, Bus.plate_no, BusStudent.student_id)
@@ -284,7 +284,7 @@ def my_buses(me: User = Depends(require_parent), db: Session = Depends(get_db)):
 @router.delete("/me/children/{student_id}", status_code=204)
 def unlink_child(
     student_id: int,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     """내 계정과 자녀의 연결만 해제한다"""
@@ -303,7 +303,7 @@ def unlink_child(
 @router.delete("/me/children/{student_id}", status_code=204)
 def unlink_my_child(
     student_id: int,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     guardian = (
@@ -321,7 +321,7 @@ def unlink_my_child(
 def set_attendance(
     student_id: int,
     body: AttendanceSet,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     """자녀 출석/결석 설정 - 내 자녀가 아니면 403"""
@@ -349,7 +349,7 @@ def set_attendance(
 def get_attendance(
     student_id: int,
     date: date,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
 

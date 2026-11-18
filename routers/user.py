@@ -6,15 +6,20 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from core.security import create_access_token, get_current_user, require_admin
+from core.security import create_access_token, get_current_user, require_admin, require_terms_agreed
+from core import terms
+from core.terms import AgreementInput, validate_agreements
+from core.time import now_kst_naive
 from database.db_connection import get_db
 from models.models import (
-    Bus, ChildRequest, Guardian, Notification, PushToken, SocialAccount, Trip, User, UserRole,
+    Bus, ChildRequest, Guardian, Notification, PushToken, SocialAccount, TermType,
+    TermsAgreement, Trip, User, UserRole,
 )
 from services.account_deletions import ACCOUNT_DELETION_GRACE_DAYS
+from services.terms import get_pending_terms
 from services.child_requests import (
     MAX_CHILDREN_AT_SIGNUP, ChildInput, dedupe, make_requests, parent_request_dict,
 )
@@ -48,6 +53,7 @@ class SignupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     # 자녀 연결 신청 (선택, 최대 5명). 가입 후 관리자가 확인해서 학생에 연결한다
     children: list[ChildInput] = Field(default_factory=list, max_length=MAX_CHILDREN_AT_SIGNUP)
+    agreements: list[AgreementInput] = Field(default_factory=list)
 
     @field_validator("password")
     @classmethod
@@ -61,6 +67,10 @@ class SignupRequest(BaseModel):
         if not v:
             raise ValueError("이름을 입력하세요")
         return v
+
+
+class AgreementsRequest(BaseModel):
+    agreements: list[AgreementInput] = Field(default_factory=list)
 
 
 class UserCreate(BaseModel):
@@ -146,12 +156,13 @@ def find_user_by_email(db: Session, email: str) -> User | None:
     return db.query(User).filter(func.lower(User.email) == email.lower()).first()
 
 
-def auth_response(u: User) -> dict:
+def auth_response(u: User, db: Session) -> dict:
     return {
         "access_token": create_access_token(u),
         "token_type": "bearer",
         "role": u.role.value,
         "user": user_to_dict(u),
+        "pending_terms": get_pending_terms(db, u),
     }
 
 
@@ -168,8 +179,12 @@ def create_user_row(
     db: Session, email: str, password: str, name: str, role: UserRole,
     children: list[ChildInput] | None = None,
     signup_method: str = "APP",
+    agreements: list[AgreementInput] | None = None,
+    commit: bool = True,
 ) -> User:
     """계정 생성 공통 처리 (자녀 연결 신청이 있으면 같은 트랜잭션에서 함께 저장). 이미 있는 이메일이면 409"""
+    if signup_method in ("APP", "GOOGLE"):
+        validate_agreements(agreements or [])
     email = email.lower()
     if find_user_by_email(db, email):
         raise HTTPException(409, "이미 가입된 이메일입니다")
@@ -184,11 +199,29 @@ def create_user_row(
     try:
         db.flush()                      # id 확보. 거의 동시에 같은 이메일이 들어오면 여기서 unique 제약에 걸린다
         db.add_all(make_requests(u.id, dedupe(children or [])))
-        db.commit()
+        if agreements:
+            agreed_at = now_kst_naive()
+            db.add_all([
+                TermsAgreement(
+                    user_id=u.id,
+                    type=TermType(item.term_type),
+                    version=item.term_version,
+                    agreed_at=agreed_at,
+                )
+                for item in agreements
+            ])
+        if commit:
+            db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "이미 가입된 이메일입니다")
-    db.refresh(u)
+        if find_user_by_email(db, email):
+            raise HTTPException(409, "이미 가입된 이메일입니다")
+        raise
+    except SQLAlchemyError:
+        db.rollback()
+        raise
+    if commit:
+        db.refresh(u)
     return u
 
 
@@ -218,6 +251,72 @@ def _account_for_deletion_recovery(body: CancelAccountDeletionRequest, db: Sessi
 
 
 # ---------- 가입 / 로그인 (누구나) ----------
+@router.get("/terms")
+def list_terms():
+    return terms.TERMS
+
+
+@router.get("/me/agreements")
+def my_agreements(me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    agreements = (
+        db.query(TermsAgreement)
+        .filter(TermsAgreement.user_id == me.id)
+        .order_by(TermsAgreement.id)
+        .all()
+    )
+    return [
+        {"term_type": item.type.value, "term_version": item.version, "agreed_at": item.agreed_at}
+        for item in agreements
+    ]
+
+
+@router.post("/me/agreements")
+def agree_to_terms(
+    body: AgreementsRequest,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if me.role != UserRole.PARENT:
+        raise HTTPException(403, "학부모 권한이 필요합니다")
+    current = {(term["type"].value, term["version"]) for term in terms.TERMS}
+    if any((item.term_type, item.term_version) not in current for item in body.agreements):
+        raise HTTPException(422, "약관 버전이 변경되었습니다. 다시 확인해 주세요")
+    submitted = {(item.term_type, item.term_version) for item in body.agreements}
+    try:
+        db.query(User.id).filter(User.id == me.id).with_for_update().one()
+        existing = {
+            (item.type.value, item.version)
+            for item in (
+                db.query(TermsAgreement)
+                .filter(TermsAgreement.user_id == me.id)
+                .with_for_update()
+                .all()
+            )
+        }
+        agreed_at = now_kst_naive()
+        db.add_all([
+            TermsAgreement(
+                user_id=me.id, type=TermType(term_type),
+                version=term_version, agreed_at=agreed_at,
+            )
+            for term_type, term_version in submitted
+            if (term_type, term_version) not in existing
+        ])
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = {
+            (item.type.value, item.version)
+            for item in db.query(TermsAgreement).filter(TermsAgreement.user_id == me.id).all()
+        }
+        if not submitted.issubset(existing):
+            raise
+    except SQLAlchemyError:
+        db.rollback()
+        raise
+    return {"pending_terms": get_pending_terms(db, me)}
+
+
 @router.post("/auth/signup", status_code=201)
 def signup(body: SignupRequest, db: Session = Depends(get_db)):
     """학부모 회원가입 (앱): email, password, name, children[] -> access_token, role, user, child_requests
@@ -226,16 +325,16 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
     - 가입 즉시 로그인된 상태의 토큰을 돌려준다. role 은 항상 PARENT (관리자 계정은 가입으로 만들 수 없다)"""
     u = create_user_row(
         db, body.email, body.password, body.name, UserRole.PARENT, body.children,
-        signup_method="APP",
+        signup_method="APP", agreements=body.agreements,
     )
     reqs = db.query(ChildRequest).filter(ChildRequest.user_id == u.id).order_by(ChildRequest.id).all()
-    return {**auth_response(u), "child_requests": [parent_request_dict(r) for r in reqs]}
+    return {**auth_response(u, db), "child_requests": [parent_request_dict(r) for r in reqs]}
 
 
 @router.post("/auth/login")
 def login(body: LoginRequest, db: Session = Depends(get_db)):
     """앱 로그인: 학부모와 기사(관리자 계정) 모두 가능. email, password -> access_token, role, user"""
-    return auth_response(authenticate(db, body))
+    return auth_response(authenticate(db, body), db)
 
 
 @router.post("/web/login")
@@ -244,13 +343,13 @@ def web_login(body: LoginRequest, db: Session = Depends(get_db)):
     u = authenticate(db, body)
     if u.role != UserRole.ADMIN:
         raise HTTPException(403, "관리자 계정만 이 화면에 로그인할 수 있습니다. 학부모는 앱에서 로그인하세요.")
-    return auth_response(u)
+    return auth_response(u, db)
 
 
 @router.put("/me/password")
 def change_password(
     body: ChangePasswordRequest,
-    me: User = Depends(get_current_user),
+    me: User = Depends(require_terms_agreed),
     db: Session = Depends(get_db),
 ):
     """현재 비밀번호를 검증한 뒤 로그인 계정의 비밀번호를 변경한다."""
@@ -358,15 +457,15 @@ def cancel_account_deletion(
     db.commit()
     db.refresh(user)
     return {
-        **auth_response(user),
+        **auth_response(user, db),
         "deletion_cancelled": True,
     }
 
 
 # ---------- 로그인한 사용자(관리자/학부모 공통) ----------
 @router.get("/me")
-def get_me(me: User = Depends(get_current_user)):
-    return user_to_dict(me)
+def get_me(me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return {**user_to_dict(me), "pending_terms": get_pending_terms(db, me)}
 
 
 @router.put("/me/push-token", status_code=204)

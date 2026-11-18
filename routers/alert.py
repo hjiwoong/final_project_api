@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import exists, func
 from sqlalchemy.orm import Session
 
-from core.security import require_admin, require_parent
+from core.security import require_admin, require_parent_terms_agreed
 from database.db_connection import get_db
 from models.models import (
     Alert, AlertLevel, AlertStatus, Attendance, BoardingEvent, BusStudent,
@@ -173,7 +173,7 @@ def my_alerts(
     status: AlertStatus | None = None,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     q = _parent_alert_query(db, me)
@@ -187,7 +187,7 @@ def my_alerts(
 @router.get("/me/alerts/{alert_id}")
 def my_alert_detail(
     alert_id: int,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     """학부모 경고 상세 - 내 아이 버스의 경고가 아니면 404"""
@@ -205,7 +205,7 @@ def my_alert_detail(
 def my_alert_event_image(
     alert_id: int,
     event_id: int,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     """학부모는 본인 자녀의 경고에 연결된 운행 승하차 사진만 조회"""

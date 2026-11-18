@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from database.db_connection import SessionLocal, get_db
 from models.models import User, UserRole
+from services.terms import get_pending_terms
 
 load_dotenv()
 
@@ -65,6 +66,26 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
 def require_parent(user: User = Depends(get_current_user)) -> User:
     if user.role != UserRole.PARENT:
         raise HTTPException(403, "학부모 권한이 필요합니다")
+    return user
+
+
+def require_terms_agreed(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+) -> User:
+    pending = get_pending_terms(db, user)
+    if pending:
+        raise HTTPException(403, detail={
+            "code": "TERMS_REQUIRED",
+            "message": "약관 동의가 필요합니다",
+            "pending_terms": pending,
+        })
+    return user
+
+
+def require_parent_terms_agreed(
+    user: User = Depends(require_parent),
+    checked: User = Depends(require_terms_agreed),
+) -> User:
     return user
 
 

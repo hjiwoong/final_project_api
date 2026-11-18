@@ -3,14 +3,15 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from database.db_connection import get_db
+from core.terms import AgreementInput
 from models.models import ChildRequest, SocialAccount, User, UserRole
-from routers.user import auth_response, find_user_by_email, hash_password
+from routers.user import auth_response, create_user_row, find_user_by_email
 from services.child_requests import (
-    MAX_CHILDREN_AT_SIGNUP, ChildInput, dedupe, make_requests, parent_request_dict,
+    MAX_CHILDREN_AT_SIGNUP, ChildInput, parent_request_dict,
 )
 from services.google_auth import verify_google_id_token
 
@@ -22,6 +23,7 @@ class GoogleLoginRequest(BaseModel):
     # 아래는 '처음 가입하는 경우'에만 쓰인다. 이미 가입된 계정이면 무시된다 (자녀는 /me/child-requests 로 추가)
     name: str | None = Field(default=None, max_length=100)
     children: list[ChildInput] = Field(default_factory=list, max_length=MAX_CHILDREN_AT_SIGNUP)
+    agreements: list[AgreementInput] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -50,22 +52,25 @@ def google_login(body: GoogleLoginRequest, db: Session = Depends(get_db)):
                 linked = True
             else:                                       # 신규 가입
                 is_new = True
-                user = User(
-                    email=g["email"],
-                    # 구글 전용 계정: 아무도 모르는 무작위 비밀번호라서 비밀번호 로그인은 불가능하다
-                    password_hash=hash_password(secrets.token_urlsafe(32)),
-                    name=body.name or g["name"] or g["email"].split("@")[0],
-                    role=UserRole.PARENT,
-                    signup_method="GOOGLE",
+                user = create_user_row(
+                    db, g["email"], secrets.token_urlsafe(32),
+                    body.name or g["name"] or g["email"].split("@")[0],
+                    UserRole.PARENT, body.children, signup_method="GOOGLE",
+                    agreements=body.agreements, commit=False,
                 )
-                db.add(user)
-                db.flush()
-                db.add_all(make_requests(user.id, dedupe(body.children)))
             db.add(SocialAccount(user_id=user.id, provider="google", subject=g["sub"], email=g["email"]))
             db.commit()
         except IntegrityError:                          # 같은 요청이 동시에 두 번 들어온 경우
             db.rollback()
-            raise HTTPException(409, "처리 중 충돌이 발생했습니다. 다시 시도하세요")
+            if (
+                db.query(SocialAccount).filter_by(provider="google", subject=g["sub"]).first()
+                or (is_new and find_user_by_email(db, g["email"]))
+            ):
+                raise HTTPException(409, "처리 중 충돌이 발생했습니다. 다시 시도하세요")
+            raise
+        except SQLAlchemyError:
+            db.rollback()
+            raise
         db.refresh(user)
 
     if user.deletion_requested_at is not None:
@@ -75,7 +80,7 @@ def google_login(body: GoogleLoginRequest, db: Session = Depends(get_db)):
 
     reqs = db.query(ChildRequest).filter(ChildRequest.user_id == user.id).order_by(ChildRequest.id).all()
     return {
-        **auth_response(user),
+        **auth_response(user, db),
         "is_new": is_new,
         "linked": linked,
         "child_requests": [parent_request_dict(r) for r in reqs],

@@ -28,6 +28,12 @@ class UserRole(str, enum.Enum):
     PARENT = "PARENT"    # 학부모
 
 
+class TermType(str, enum.Enum):
+    COOKIE = "COOKIE"
+    TERMS = "TERMS"
+    PRIVACY = "PRIVACY"
+
+
 class TripStatus(str, enum.Enum):
     IN_PROGRESS = "IN_PROGRESS"
     CLOSED = "CLOSED"
@@ -86,6 +92,21 @@ class User(Base):
 
     guardians = relationship("Guardian", back_populates="user")
     notifications = relationship("Notification", back_populates="user")
+
+
+class TermsAgreement(Base):
+    __tablename__ = "terms_agreements"
+    __table_args__ = (
+        UniqueConstraint("user_id", "type", "version", name="uq_terms_agreement"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    type = Column(Enum(TermType), nullable=False)
+    version = Column(String(100), nullable=False)
+    agreed_at = Column(DateTime, nullable=False)
+
+    user = relationship("User", foreign_keys=[user_id])
 
 
 # ---------- 학생 / 보호자 ----------
