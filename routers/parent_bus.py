@@ -4,7 +4,7 @@ from datetime import date
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from core.security import require_parent
+from core.security import require_parent_terms_agreed
 from database.db_connection import get_db
 from models.models import (
     Bus, BusStudent, Guardian, Trip, TripSchedule, TripStatus, User,
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/me", tags=["학부모-버스운행"])
 
 @router.get("/buses")
 def get_parent_buses(
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     buses = (
@@ -44,7 +44,7 @@ def get_parent_buses(
 
 @router.get("/bus-status")
 def get_parent_bus_status(
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     # 로그인한 학부모의 자녀가 배정된 버스 조회

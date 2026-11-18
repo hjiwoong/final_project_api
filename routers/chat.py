@@ -15,7 +15,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from core.security import get_current_user
+from core.security import require_terms_agreed
 from database.db_connection import get_db
 from models.models import (
     Alert, AlertLevel, AlertStatus, Attendance, Bus, BusStudent, Guardian, Trip, TripStatus, User, UserRole,
@@ -77,12 +77,12 @@ def _user_context(db: Session, me: User) -> dict:
 
 
 @router.get("/hello")
-def chat_hello(me: User = Depends(get_current_user)):
+def chat_hello(me: User = Depends(require_terms_agreed)):
     return chat_service.hello(me.role.value)
 
 
 @router.post("")
-async def chat(body: ChatBody, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def chat(body: ChatBody, me: User = Depends(require_terms_agreed), db: Session = Depends(get_db)):
     context = _user_context(db, me)
     if body.alert_id is not None:
         a = _alert_for(db, me, body.alert_id)           # 남의 경고면 404

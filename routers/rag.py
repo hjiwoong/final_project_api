@@ -15,7 +15,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from core.security import get_current_user
+from core.security import require_terms_agreed
 from database.db_connection import get_db
 from models.models import Alert, User, UserRole
 try:
@@ -87,7 +87,7 @@ def _alert_context(a: Alert) -> str:
 
 
 @router.post("/ask")
-async def ask(body: AskBody, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def ask(body: AskBody, me: User = Depends(require_terms_agreed), db: Session = Depends(get_db)):
     question = (body.question or "").strip()
     context = None
     if body.alert_id is not None:

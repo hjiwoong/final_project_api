@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from core.security import require_admin, require_parent
+from core.security import require_admin, require_parent_terms_agreed
 from database.db_connection import get_db
 from models.models import ChildRequest, ChildRequestStatus, Guardian, Student, User
 from services.child_requests import (
@@ -24,14 +24,14 @@ def _get_request_or_404(db: Session, request_id: int) -> ChildRequest:
 
 # ====================== 학부모 (앱) ======================
 @router.get("/me/child-requests")
-def my_child_requests(me: User = Depends(require_parent), db: Session = Depends(get_db)):
+def my_child_requests(me: User = Depends(require_parent_terms_agreed), db: Session = Depends(get_db)):
     """내가 올린 자녀 연결 요청과 처리 상태 (PENDING / APPROVED / REJECTED + 거절 사유)"""
     rows = db.query(ChildRequest).filter(ChildRequest.user_id == me.id).order_by(ChildRequest.id.desc()).all()
     return [parent_request_dict(r) for r in rows]
 
 
 @router.post("/me/child-requests", status_code=201)
-def add_child_request(body: ChildInput, me: User = Depends(require_parent), db: Session = Depends(get_db)):
+def add_child_request(body: ChildInput, me: User = Depends(require_parent_terms_agreed), db: Session = Depends(get_db)):
     """앱에서 자녀 추가: 이름·반·관계를 적어 올리면 관리자 승인을 기다린다"""
     pending = db.query(ChildRequest).filter(
         ChildRequest.user_id == me.id, ChildRequest.status == ChildRequestStatus.PENDING)
@@ -61,7 +61,7 @@ def add_child_request(body: ChildInput, me: User = Depends(require_parent), db: 
 
 
 @router.delete("/me/child-requests/{request_id}", status_code=204)
-def cancel_child_request(request_id: int, me: User = Depends(require_parent), db: Session = Depends(get_db)):
+def cancel_child_request(request_id: int, me: User = Depends(require_parent_terms_agreed), db: Session = Depends(get_db)):
     """승인 대기 중인 내 요청 취소 (잘못 적었을 때)"""
     r = db.get(ChildRequest, request_id)
     if not r or r.user_id != me.id:            # 남의 요청은 존재 여부도 숨김

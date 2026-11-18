@@ -4,6 +4,30 @@
 
 ## 학부모 자녀 연결 API
 
+### 회원가입 약관 동의
+
+인증 없이 `GET /terms`를 호출하면 필수 약관의 `type`, `title`, `version`, `required` 목록을 반환합니다. 일반 회원가입(`POST /auth/signup`)과 신규 Google 가입(`POST /auth/google`)에는 응답의 세 약관에 대한 동의를 다음 형식으로 `agreements`에 포함해야 합니다.
+
+```json
+{"agreements": [
+  {"term_type": "COOKIE", "term_version": "2026-11-18"},
+  {"term_type": "TERMS", "term_version": "2026-11-18"},
+  {"term_type": "PRIVACY", "term_version": "2026-11-18"}
+]}
+```
+
+약관이 누락되거나 버전이 현재 버전과 다르면 가입이 거부됩니다. 앱은 가입 직전에 현재 버전을 조회해야 하며, 동의를 보내지 않는 기존 앱의 신규 가입은 더 이상 동작하지 않습니다. 기존 Google 계정 로그인과 기존 계정의 Google 연결, 관리자 계정 생성에는 동의가 필요하지 않습니다. 로그인한 사용자는 `GET /me/agreements`에서 자신의 동의 이력을 조회할 수 있으며, 동의 시각은 서버가 KST 벽시각으로 기록합니다.
+
+기존 학부모도 로그인 후 `POST /me/agreements`에 위와 같은 `agreements` 목록을 보내 현재 약관에 동의할 수 있습니다. 일부만 제출해도 되며, 응답의 `pending_terms`에 남은 필수 약관이 표시됩니다. 이미 기록된 동일 버전의 동의 시각은 유지하고, 누락된 버전만 저장합니다. 오래된 버전은 422로 거부합니다. 로그인 토큰이 필요하며 다른 계정 대신 동의할 수 없습니다.
+
+로그인·가입·Google 로그인·계정 복구 응답과 `GET /me`의 `pending_terms`에서 미동의 필수 약관을 확인할 수 있습니다. 미동의 학부모가 자녀·버스·위치·알림·채팅 등의 보호된 API를 호출하면 `403`과 `detail.code: "TERMS_REQUIRED"` 및 `detail.pending_terms`가 반환됩니다. 로그인, 약관 조회·동의, 계정 삭제 요청, 푸시 토큰 등록·해제는 동의 전에도 이용할 수 있습니다. 관리자는 동의 검사의 대상이 아닙니다. 이전에 배포된 앱은 이 403을 처리하지 못할 수 있으므로 앱 업데이트를 준비한 뒤 서버를 배포하세요.
+
+`terms_agreements` 테이블은 서버 시작 시 자동 생성됩니다. 서버를 시작하기 전에 새 테이블만 생성하려면 DB 접속 환경을 설정한 뒤 다음을 실행하세요.
+
+```powershell
+python -c "from database.orm import Base; from database.db_connection import engine; from models.models import TermsAgreement; Base.metadata.create_all(bind=engine, tables=[TermsAgreement.__table__])"
+```
+
 모든 학부모 API는 로그인 후 발급받은 액세스 토큰을 Authorization 헤더에 포함해야 합니다.
 계정 상세 정보에는 최초 생성 경로(`APP`, `GOOGLE`, `ADMIN`, `UNKNOWN`)를 포함합니다. 이메일 계정에 Google 로그인을 나중에 연결해도 최초 생성 경로는 변경되지 않으며, 기존 계정은 `UNKNOWN`으로 마이그레이션됩니다.
 

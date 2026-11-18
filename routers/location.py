@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
-from core.security import require_admin, require_parent
+from core.security import require_admin, require_parent_terms_agreed
 from database.db_connection import get_db
 from models.models import Guardian, Student, User
 from services.location_crypto import (
@@ -253,7 +253,7 @@ def _get_my_child(db: Session, me: User, student_id: int) -> Student:
 @router.get("/me/location/search")
 def search_address(
     address: str = Query(min_length=2, max_length=255),
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
 ):
     """입력 중인 주소의 후보 목록 (자동완성용). 결과가 없으면 빈 목록."""
     query = address.strip()
@@ -279,7 +279,7 @@ def search_address(
 @router.get("/me/children/{student_id}/location")
 def get_child_location(
     student_id: int,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     return _location_response(_get_my_child(db, me, student_id))
@@ -289,7 +289,7 @@ def get_child_location(
 def update_child_location(
     student_id: int,
     body: LocationUpdate,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     student = _get_my_child(db, me, student_id)
@@ -310,7 +310,7 @@ def update_child_location(
 @router.delete("/me/children/{student_id}/location", status_code=204)
 def delete_child_location(
     student_id: int,
-    me: User = Depends(require_parent),
+    me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
     student = _get_my_child(db, me, student_id)
