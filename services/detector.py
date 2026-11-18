@@ -34,16 +34,8 @@ def _build_model_candidates() -> list[str]:
     else:
         weights_dir = BASE_DIR / "weights"
         if weights_dir.exists():
-            preferred = weights_dir / "bus_person_k5_final_26s_1109_0926.pt"
-            configured = [
-                str(path)
-                for path in (
-                    preferred,
-                    weights_dir / "bus_person_1029_0718.pt",
-                    weights_dir / "yolo11s.pt",
-                )
-                if path.is_file()
-            ]
+            # 서비스 기본값: 직접 촬영한 사진으로 학습한 k5 단일 모델
+            configured = [str(weights_dir / "bus_person_k5_final_26s_1109_0926.pt")]
         else:
             configured = ["weights/bus_person_k5_final_26s_1109_0926.pt"]
 
@@ -60,8 +52,8 @@ def _build_model_candidates() -> list[str]:
 MODEL_CANDIDATES = _build_model_candidates()
 YOLO_MODEL = MODEL_CANDIDATES[0] if MODEL_CANDIDATES else str((BASE_DIR / "weights" / "yolo11s.pt").resolve())
 
-# 모든 설정 모델을 로드해 앙상블 추론에 사용한다.
-# .env 의 YOLO_MODELS 에 모델 경로를 쉼표로 구분해 설정한다.
+# 설정한 모델을 모두 로드해 추론한다. 기본은 k5 단일 모델(YOLO_MODEL).
+# 여러 모델을 앙상블하려면 .env 의 YOLO_MODELS 에 경로를 쉼표로 구분해 적는다.
 YOLO_MODELS = MODEL_CANDIDATES
 
 # 업로드된 사진을 15초 내에 처리해야 브라우저/요청 클라이언트의 receive timeout 을 피할 수 있다.

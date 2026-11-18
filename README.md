@@ -2,9 +2,38 @@
 
 통학버스 기사가 운행 시작(승차)과 종점(하차) 시점에 차량 내부 사진을 찍어 올리면, 서버가 YOLO로 인원을 세고 승차 인원과 비교해 미하차(차 안에 남은 아이) 의심을 판정합니다. 의심되면 기사·관리자·보호자에게 앱 알림과 FCM 푸시를 보내고, 기사가 차량 내부를 직접 확인한 뒤 사유를 남겨야 운행을 종료할 수 있습니다.
 
-- 앱(기사·관리자 / 학부모): `hjiwoong/final_project_app` (Flutter)
+- 앱(기사·관리자 / 학부모): [hjiwoong/final_project_app](https://github.com/hjiwoong/final_project_app) (Flutter)
 - 관리자 웹: 이 서버의 `/admin/` (정적 파일 `web/`)
 - API 문서: 서버 실행 후 `/docs` (Swagger)
+
+> AI 판정은 기사의 하차 확인 의무를 대신하지 않는 보조 수단입니다. 판정 결과와 관계없이 기사가 차량 내부를 직접 확인해야 운행이 종료됩니다.
+
+## 주요 기능
+
+| 사용자 | 기능 |
+|---|---|
+| 기사 (앱) | 운행 시작, 탑승 지도, 승차·종점 사진 촬영 → 인원 판정, 재촬영, 안전 확인 후 운행 종료, 출결 확인 |
+| 학부모 (앱) | 자녀 연결 요청, 결석 설정, 버스 운행 상태, 미하차·운행 시작·종료·미출발 알림, 경고 상세·AI 대응 수칙, 챗봇, 자녀 위치 |
+| 관리자 (웹) | 대시보드(알림 지연 포함), 운행·경고 실시간 확인과 처리, 자녀 연결 승인, 학생·보호자·버스·배정·출발 예정 시각 관리 |
+
+## 결과 요약
+
+| 항목 | 목표 | 결과 |
+|---|---|---|
+| 인원 카운트 정확도 (±1명 이내 사진 비율) | 80% 이상 | 98.5% (Test 66장, 정확히 일치 83.3%) |
+| 미하차 감지 정확도 (사람이 남은 사진에서 경고가 나는 비율) | 90% 이상 | 90.7% (43장 중 39장) |
+| 서버 기능 테스트 | - | 41개 항목 통과 |
+
+학습·평가 데이터는 아동 사진이나 인터넷 이미지 대신 팀원이 시연 차량에서 직접 촬영한 사진 216장입니다(성인 팀원, 비공개 보관). 놓친 사례는 누운 자세와 아주 어두운 사진이었습니다.
+
+## 팀
+
+| 이름 | 담당 |
+|---|---|
+| 전지웅 | 서버·DB, 모델 학습, AI 연계 |
+| 김태환 | 관리자 웹, 문서 |
+| 김민지 | AI 데이터, 학부모 앱 |
+| 김지수 | AI 데이터, 관리자(기사) 앱 |
 
 ## 기술 스택
 
@@ -53,7 +82,12 @@ seed_admin.py         첫 관리자 계정 생성 스크립트
    python main.py
    ```
    `0.0.0.0:8000`에서 실행됩니다. 앱은 같은 네트워크에서 서버 PC의 IP(`http://<서버IP>:8000`)로 접속합니다. 시연 환경은 HTTP이며, 실제 운영 시에는 HTTPS(리버스 프록시) 적용이 필요합니다.
-6. `GET /health`로 DB·인원 감지 모드·푸시·AI 설정 상태를 확인합니다.
+6. `GET /health`로 DB·인원 감지 모드·푸시·AI 설정 상태를 확인합니다. 관리자 웹은 `http://<서버IP>:8000/admin/`에서 엽니다.
+7. 앱([final_project_app](https://github.com/hjiwoong/final_project_app))은 서버 주소를 넣어 실행합니다.
+   ```
+   flutter pub get
+   flutter run --dart-define=API_BASE_URL=http://<서버IP>:8000
+   ```
 
 ## 환경변수 (`.env`)
 
@@ -65,7 +99,7 @@ seed_admin.py         첫 관리자 계정 생성 스크립트
 | 위치 | `LOCATION_ENCRYPTION_KEY` | 자녀 주소·좌표 암호화 키 (Fernet). 없으면 서버 시작 중단 |
 | 위치 | `NAVER_MAPS_CLIENT_ID`, `NAVER_MAPS_CLIENT_SECRET`, `NAVER_SEARCH_CLIENT_ID`, `NAVER_SEARCH_CLIENT_SECRET` | 네이버 Geocoding·지역 검색 API 키 |
 | 인원 감지 | `DETECTOR_MODE` | `real` 실제 추론 / `mock` 시연용 가짜 결과 (`real`) |
-| 인원 감지 | `YOLO_MODELS` / `YOLO_MODEL` | 사용할 모델 경로 (아래 '사람 검출 모델' 참고) |
+| 인원 감지 | `YOLO_MODEL` / `YOLO_MODELS` | 사용할 모델 경로. 서비스는 `YOLO_MODEL`에 k5 하나 (아래 '사람 검출 모델' 참고) |
 | 인원 감지 | `CONF_THRESHOLD`, `LOW_CONF_THRESHOLD`, `IOU_THRESHOLD`, `IMG_SIZE`, `DETECTOR_TIMEOUT_SEC` | 사람 판정 신뢰도(`0.25`), 신뢰도 낮음 기준(`0.5`), 박스 병합 IoU(`0.5`), 입력 크기(`640`), 추론 제한 시간(`12`초) |
 | 사진 | `UPLOAD_DIR`, `IMAGE_RETENTION_DAYS` | 사진 저장 폴더(`uploads`), 보관 기간(`14`일) |
 | 푸시 | `FIREBASE_SERVICE_ACCOUNT_FILE` 또는 `GOOGLE_APPLICATION_CREDENTIALS`, `FCM_ANDROID_CHANNEL_ID` | Firebase 서비스 계정 JSON 경로, Android 알림 채널(`safety_alerts`) |
@@ -74,15 +108,17 @@ seed_admin.py         첫 관리자 계정 생성 스크립트
 
 ## 사람 검출 모델
 
-버스 승객 검출 모델은 팀원이 시연 차량에서 직접 촬영한 사진으로 YOLO26s를 전이학습한 `weights/bus_person_k5_final_26s_1109_0926.pt`(k5, 최종 모델)를 사용합니다. 같은 Test 66장 기준 인원 정확 일치율 0.833, 재현율 0.895로 이전 모델(k1~k4) 중 미하차 경고 누락이 가장 적었습니다. 자세한 수치는 노션의 AI 성능 평가 보고서를 참고하세요.
+서비스는 팀원이 시연 차량에서 직접 촬영한 사진으로 YOLO26s를 전이학습한 `weights/bus_person_k5_final_26s_1109_0926.pt`(k5, 최종 모델) **하나로** 사람을 셉니다. 같은 Test 66장 기준 인원 정확 일치율 0.833, 재현율 0.895로 이전 모델(k1~k4) 중 미하차 경고 누락이 가장 적었습니다. 자세한 수치는 노션의 AI 성능 평가 보고서를 참고하세요.
+
+예전 모델(`bus_person_1029_0718.pt`)·COCO 모델(`yolo11s.pt`)과의 3개 모델 앙상블도 검토했지만, 함께 묶을 모델의 성능이 낮고 검출을 합치는 방식이라 창밖 행인 같은 오검출이 늘 수 있어 쓰지 않습니다. 앙상블 기능 자체는 실험용으로 남겨 두었습니다.
 
 | 설정 | 동작 |
 |---|---|
-| `YOLO_MODELS=a.pt,b.pt,c.pt` | 쉼표로 적은 모델을 모두 불러 앙상블 추론. 각 모델의 사람 박스를 합친 뒤 겹치는 박스를 억제해 중복 인원을 줄임 |
-| `YOLO_MODEL=a.pt` (`YOLO_MODELS` 비움) | 모델 하나로만 추론 |
-| 둘 다 비움 | `weights/`의 기본 3개(k5 → `bus_person_1029_0718.pt` → `yolo11s.pt`) 앙상블 |
+| `YOLO_MODEL=weights/bus_person_k5_final_26s_1109_0926.pt` | **서비스 설정.** 모델 하나로 추론 |
+| `YOLO_MODELS=a.pt,b.pt,c.pt` | 쉼표로 적은 모델을 모두 불러 앙상블 추론 (실험용). 각 모델의 사람 박스를 합친 뒤 겹치는 박스를 억제해 중복 인원을 줄임. 있으면 `YOLO_MODEL`보다 우선 |
+| 둘 다 비움 | `weights/`의 k5 모델 하나 사용 |
 
-`YOLO_MODELS`가 있으면 `YOLO_MODEL`은 무시됩니다. 설정한 모델 중 하나라도 불러오지 못하면 일부 모델만으로 잘못된 결과를 내지 않도록 추론을 실패(`503`) 처리합니다. 신규 모델의 `passenger` 클래스와 COCO 모델의 `person` 클래스를 모두 사람으로 셉니다. 시연용 목업이 필요할 때만 `DETECTOR_MODE=mock`으로 바꾸세요.
+설정한 모델을 하나라도 불러오지 못하면 잘못된 결과를 내지 않도록 추론을 실패(`503`) 처리합니다. 신규 모델의 `passenger` 클래스와 COCO 모델의 `person` 클래스를 모두 사람으로 셉니다. 시연용 목업이 필요할 때만 `DETECTOR_MODE=mock`으로 바꾸세요.
 
 ## 사진 보관과 자동 삭제
 
