@@ -16,6 +16,17 @@
   };
   const TOKEN_KEY = 'bus_admin_token';
   const USER_KEY = 'bus_admin_user';
+  // 기존 API에는 DRIVER 역할이 없어, 이 브라우저에서 등록한 기사 이메일만 별도 표시한다.
+  const DRIVER_EMAILS_KEY = 'bus_admin_registered_driver_emails';
+  const registeredDriverEmails = () => {
+    try { const emails = JSON.parse(store.get(DRIVER_EMAILS_KEY) || '[]'); return Array.isArray(emails) ? emails : []; }
+    catch { return []; }
+  };
+  const rememberDriverEmail = (email) => {
+    const emails = new Set(registeredDriverEmails());
+    emails.add(String(email).trim().toLowerCase());
+    store.set(DRIVER_EMAILS_KEY, JSON.stringify([...emails]));
+  };
   let token = store.get(TOKEN_KEY) || '';
   let me = null;
   try { me = JSON.parse(store.get(USER_KEY) || 'null'); } catch { me = null; }
@@ -199,71 +210,37 @@
       return `<div class="dashboard-chart-empty" role="status"><span class="dashboard-chart-empty-icon" aria-hidden="true">▥</span><strong>아직 운행 데이터가 없습니다</strong><p>운행이 기록되면 이곳에 일별 운행 및 경고 추이가 표시됩니다.</p></div>`;
     }
 
-    const W = 1000;
-    const H = 260;
-    const top = 35;
-    const bottom = 45;
-    const side = 55;
-    const bw = 24;
-
-    const max = Math.max(
-      1,
-      ...daily.flatMap(d => [d.trips, d.alerts])
-    );
-
-    const plotH = H - top - bottom;
-    const slot = (W - side * 2) / daily.length;
-
-    let out = '';
-
-    daily.forEach((d, i) => {
-      const cx = side + slot * i + slot / 2;
-
-      const bar = (value, x, cls) => {
-        const h = (value / max) * plotH;
-        const y = H - bottom - h;
-
-        return `
-          ${value > 0 ? `
-            <rect class="${cls}"
-              x="${x}" y="${y}"
-              width="${bw}" height="${h}" rx="4"/>
-          ` : ''}
-          <text x="${x + bw / 2}"
-            y="${y - 9}"
-            text-anchor="middle"
-            font-size="13">${value}</text>
-        `;
+    const values = daily.map(d => ({
+      date: String(d.date || ''),
+      trips: Math.max(0, Number(d.trips) || 0),
+      alerts: Math.max(0, Number(d.alerts) || 0)
+    }));
+    const W = 1000, H = 290, left = 46, right = 20, top = 60, bottom = 48;
+    const chartWidth = W - left - right;
+    const chartHeight = H - top - bottom;
+    const maxValue = Math.max(1, ...values.flatMap(d => [d.trips, d.alerts]));
+    const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
+    const step = Math.max(1, Math.ceil(maxValue / (4 * magnitude)) * magnitude);
+    const ceiling = Math.ceil(maxValue / step) * step;
+    const slot = chartWidth / values.length;
+    const barWidth = Math.min(24, Math.max(5, slot * .24));
+    const baseline = top + chartHeight;
+    const grid = Array.from({length: Math.round(ceiling / step) + 1}, (_, i) => {
+      const value = i * step;
+      const y = baseline - value / ceiling * chartHeight;
+      return `<line x1="${left}" y1="${y}" x2="${W-right}" y2="${y}" stroke="${value === 0 ? '#cad6e5' : '#eaf0f7'}" stroke-width="1"/><text x="${left-11}" y="${y+4}" text-anchor="end" fill="#7b8ca2" font-size="12">${value}</text>`;
+    }).join('');
+    const bars = values.map((d, i) => {
+      const center = left + slot * (i + .5);
+      const drawBar = (value, x, cls, label) => {
+        const height = value / ceiling * chartHeight;
+        const y = baseline - height;
+        return `<rect class="${cls}" x="${x}" y="${y}" width="${barWidth}" height="${height}" rx="3"><title>${esc(d.date)} ${label} ${value}건</title></rect>${value ? `<text class="dashboard-bar-value" x="${x+barWidth/2}" y="${y-7}" text-anchor="middle">${value}</text>` : ''}`;
       };
-
-      out += bar(d.trips, cx - bw - 4, 'bar-trip');
-      out += bar(d.alerts, cx + 4, 'bar-alert');
-
-      out += `
-        <text x="${cx}" y="${H - 15}"
-          text-anchor="middle"
-          font-size="13">
-          ${esc(d.date.slice(5).replace('-', '.'))}
-        </text>
-      `;
-    });
-
-    return `
-      <div class="legend">
-        <span><i style="background:var(--slate)"></i>운행</span>
-        <span><i style="background:var(--red)"></i>경고</span>
-      </div>
-      <svg viewBox="0 0 ${W} ${H}"
-        role="img"
-        aria-label="일별 운행 수와 경고 수 막대 그래프"
-        style="width:100%;height:260px;display:block"
-        preserveAspectRatio="xMidYMid meet">
-        ${out}
-        <line x1="${side}" x2="${W - side}"
-          y1="${H - bottom}" y2="${H - bottom}"
-          stroke="#d8dee4"/>
-      </svg>
-    `;
+      const showLabel = values.length <= 14 || i % Math.ceil(values.length / 12) === 0 || i === values.length-1;
+      return `${drawBar(d.trips, center-barWidth-3, 'bar-trip', '운행')}${drawBar(d.alerts, center+3, 'bar-alert', '경고')}${showLabel ? `<text x="${center}" y="${H-17}" text-anchor="middle" fill="#71849c" font-size="12">${esc(d.date.slice(5).replace('-', '.'))}</text>` : ''}`;
+    }).join('');
+    return `<div class="dashboard-chart-legend" aria-hidden="true"><span><i class="chart-legend-trip"></i>운행</span><span><i class="chart-legend-alert"></i>경고</span></div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="일별 운행 및 경고 건수 막대 그래프" preserveAspectRatio="xMidYMid meet">${grid}${bars}</svg>`;
   }
 
   const uiIcon = (name, size = 24) => {
@@ -2283,6 +2260,9 @@
     );
     window.busEditData = buses;
     const admins = users.filter((u) => u.role === 'ADMIN');
+    const savedDriverEmails = new Set(registeredDriverEmails());
+    const assignedDriverIds = new Set(buses.filter(b => b.driver_id != null).map(b => Number(b.driver_id)));
+    const visibleDrivers = admins.filter(u => assignedDriverIds.has(Number(u.id)) || savedDriverEmails.has(String(u.email || '').toLowerCase()));
     const driverName = (id) =>
       admins.find((u) => Number(u.id) === Number(id))?.name || '미지정';
     const assigned = await Promise.all(
@@ -2473,8 +2453,8 @@
           </div>
         </div>
 
-        <div class="tablewrap">
-          <table>
+        <div class="tablewrap bus-assignment-tablewrap">
+          <table class="bus-assignment-table">
             <thead>
               <tr>
                 <th>버스</th>
@@ -2491,6 +2471,45 @@
             </tbody>
           </table>
         </div>
+
+        <section class="student-registration driver-management" aria-label="기사 등록 및 관리">
+          <details class="registration-toggle">
+            <summary>기사 등록 및 관리 <span>클릭해서 펼치기</span></summary>
+            <div class="driver-management-content">
+              <div class="driver-panel-heading">
+                <div><h2>기사 관리</h2><p>담당 기사의 차량 배정 현황을 확인하고 신규 계정을 등록합니다.</p></div>
+                <span class="driver-count">배정 현황 ${num(visibleDrivers.length)}명</span>
+              </div>
+              <div class="driver-account-list">
+                <div class="tablewrap">
+                  <table>
+                    <thead><tr><th>기사 이름</th><th>이메일</th><th>담당 차량</th><th>배정 상태</th></tr></thead>
+                    <tbody>
+                      ${visibleDrivers.map((u) => {
+                        const driverBuses = buses.filter((b) => Number(b.driver_id) === Number(u.id));
+                        return `<tr><td><strong>${esc(u.name)}</strong></td><td>${esc(u.email)}</td><td>${driverBuses.length ? esc(driverBuses.map((b) => b.name).join(', ')) : '—'}</td><td><span class="driver-status ${driverBuses.length ? 'is-assigned' : ''}">${driverBuses.length ? '배정 완료' : '미배정'}</span></td></tr>`;
+                      }).join('') || '<tr><td colspan="4" class="empty">확인된 기사가 없습니다. 아래에서 기사를 등록하거나 버스에 담당 기사를 배정하세요.</td></tr>'}
+                    </tbody>
+                  </table>
+                </div>
+                <p class="driver-list-note">차량 변경은 아래 <strong>버스 등록 및 학생 배정</strong>에서 해당 버스의 수정 버튼을 이용하세요.</p>
+              </div>
+              <details class="driver-create-toggle">
+                <summary>+ 신규 기사 등록</summary>
+                <form data-form="driver" class="driver-create-form">
+                  <div class="driver-form-fields">
+                    <label>기사 이름<input name="name" required maxlength="100" placeholder="예: 김철수" autocomplete="name"></label>
+                    <label>이메일<input name="email" type="email" required placeholder="예: driver01@example.com" autocomplete="off"></label>
+                    <label>비밀번호<input name="password" type="password" required minlength="8" autocomplete="new-password" placeholder="8자 이상"></label>
+                  </div>
+                  <button type="submit" class="btn primary">기사 등록</button>
+                  <p class="driver-permission-note">현재 시스템의 기사 계정은 ADMIN 권한으로 생성됩니다. 신뢰할 수 있는 담당자만 등록하세요.</p>
+                </form>
+              </details>
+              <p class="driver-list-note driver-data-note"></p>
+            </div>
+          </details>
+        </section>
 
         <section class="student-registration" aria-label="버스 등록 및 학생 배정">
           <details class="registration-toggle">
@@ -2625,6 +2644,14 @@
     async student(f) {
       await api('/web/students', { method: 'POST', body: { name: f.name, class_name: f.class_name || null, consent_at: f.consent_at ? `${f.consent_at}T00:00:00` : null } });
       return '학생을 등록했습니다';
+    },
+    async driver(f) {
+      await api('/web/users', {
+        method: 'POST',
+        body: { name: f.name.trim(), email: f.email.trim(), password: f.password, role: 'ADMIN' }
+      });
+      rememberDriverEmail(f.email);
+      return '기사 계정을 등록했습니다. 버스 등록 및 학생 배정에서 해당 기사를 차량에 배정하세요.';
     },
     async parent(f) {
       await api('/web/users', { method: 'POST', body: { name: f.name, email: f.email, password: f.password, role: 'PARENT' } });
