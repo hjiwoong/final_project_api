@@ -247,7 +247,7 @@ textarea { min-height: 5rem; resize: vertical; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(76,197,138,.6); } 70%,100% { box-shadow: 0 0 0 7px rgba(76,197,138,0); } }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1180px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .rail { min-width: 0; }
   .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: .6rem 0 0; }
@@ -321,7 +321,7 @@ input:focus, select:focus, textarea:focus { border-color: #526a87; outline: none
   .strip > div:nth-child(n) { border: 1px solid var(--line); }
   #view { padding: 1.75rem 1.5rem 4rem; }
 }
-@media (max-width: 860px) {
+@media (max-width: 1180px) {
   #view { padding: 1.25rem 1rem 3rem; }
   .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .strip > div:nth-child(n) { border: 1px solid var(--line); }
@@ -1255,7 +1255,7 @@ input[type="checkbox"] { display: inline-block; width: 1.1rem; height: 1.1rem; m
 @media (max-width:650px) {.dashboard-hero {align-items:flex-start;flex-direction:column;}.dashboard-hero-meta {align-items:flex-start;}.dashboard-kpis {grid-template-columns:1fr;}.overview-distribution {grid-column:auto;}.overview-kpi {min-height:145px;}.dashboard-v2 .dashboard-panel-head {flex-wrap:wrap;}.dashboard-toolbar {flex-wrap:wrap;}.dashboard-feed-tags {max-width:85px;}.dashboard-urgent-list {grid-template-columns:1fr;}}
 
 /* Sidebar redesign / dashboard icon polish */
-@media (min-width:861px) {
+@media (min-width:1181px) {
   .app { grid-template-columns: 248px minmax(0,1fr); }
   .rail { background:#172536; padding-top:0; }
   .rail .brand { min-height:91px; padding:17px 19px; border-bottom:1px solid #304052; gap:12px; }
@@ -1279,7 +1279,7 @@ input[type="checkbox"] { display: inline-block; width: 1.1rem; height: 1.1rem; m
 .dashboard-bus-icon { color:#d89c00;background:#fff5d9; }
 .dashboard-fleet-row .bus-status.running { background:#e0f7ea;color:#147a47; }
 .dashboard-fleet-row .bus-status.idle { background:#edf1f6;color:#526579; }
-@media (max-width:860px) { .rail .brand {gap:10px;} .rail-nav-label {gap:8px;} .rail-nav-label svg {width:17px;height:17px;} .rail-brand-title small {display:none;} .rail #logout {width:auto;padding:5px 10px;} }
+@media (max-width:1180px) { .rail .brand {gap:10px;} .rail-nav-label {gap:8px;} .rail-nav-label svg {width:17px;height:17px;} .rail-brand-title small {display:none;} .rail #logout {width:auto;padding:5px 10px;} }
 
 /* 운행 관리 UI 고도화 */
 .trip-summary-v2 {
@@ -2858,7 +2858,7 @@ input[type="checkbox"] { display: inline-block; width: 1.1rem; height: 1.1rem; m
 }
 
 /* 작은 화면: 메뉴를 두 줄로 배치 */
-@media (max-width: 860px) {
+@media (max-width: 1180px) {
   .rail nav {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4818,14 +4818,14 @@ input[type="checkbox"] { display: inline-block; width: 1.1rem; height: 1.1rem; m
 }
 
 /* 버스가 많아져도 카드 높이가 과도하게 늘어나지 않도록 */
-@media (min-width: 861px) {
+@media (min-width: 1181px) {
   .dashboard-fleet-list {
     max-height: 350px;
   }
 }
 
 /* 모바일에서는 자연스럽게 콘텐츠 높이 사용 */
-@media (max-width: 860px) {
+@media (max-width: 1180px) {
   .dashboard-main-grid > .dashboard-panel {
     height: auto;
   }
@@ -5188,3 +5188,703 @@ body:has(.bus-summary-grid) .main { background:transparent; }
 .driver-permission-note { color:#8a5b23; font-size:12px; line-height:1.5; margin:12px 0 0; }
 .driver-data-note { margin:12px 0 0; font-size:12px; color:#7a8798; }
 @media(max-width:900px){ .driver-form-fields{grid-template-columns:1fr;} .driver-panel-heading{align-items:flex-start;flex-direction:column;} }
+
+
+/* =====================================================================
+   통학이 노란 테마 (이 아래부터 파일 끝까지)
+   위쪽 규칙들을 덮어쓰므로 항상 style.css 맨 끝에 두기
+   ===================================================================== */
+:root {
+  --bus: #FFC83D;        /* 메인 노랑 (앱 아이콘 버스) */
+  --bus-soft: #FFF1C9;   /* 연한 노랑 배경 */
+  --bus-deep: #8A5A00;   /* 흰 배경 위 링크·강조 글씨 (대비 확보용 진한 황토) */
+  --navy: #263056;       /* 글씨·사이드바 */
+  --cream: #FFF8EA;      /* 페이지 배경 */
+  --cream-line: #EFE2C4; /* 카드 테두리 */
+  --orange: #F2784B;
+  --yellow: var(--bus);
+  --ink: var(--navy);
+  --paper: var(--cream);
+  --line: var(--cream-line);
+}
+
+body, .main { background: var(--cream) !important; color: var(--navy); }
+
+/* ---------- 사이드바 ---------- */
+.rail { background: var(--navy) !important; }
+.rail .brand { border-bottom-color: rgba(255,255,255,.12) !important; }
+.rail-brand-icon svg { display: none; }
+.rail-brand-icon, .brand-mark {
+  width: 38px !important; height: 38px !important; box-shadow: none !important;
+  background: url('tonghaki_bus.svg') center/contain no-repeat !important;
+}
+.rail nav a[aria-current="page"] {
+  background: rgba(255,255,255,.1) !important; border-left-color: var(--bus) !important; color: #fff !important;
+}
+.rail nav a[aria-current="page"] .rail-nav-label svg { color: var(--bus) !important; }
+.rail-foot { border-top-color: rgba(255,255,255,.12) !important; }
+.rail #logout { border-color: rgba(255,255,255,.3) !important; border-radius: 12px !important; }
+
+/* ---------- 상단 히어로 ---------- */
+.dashboard-v2 .dashboard-hero {
+  background: var(--bus-soft) !important; border: 1px solid #F6DFA0 !important; border-radius: 20px !important;
+  box-shadow: none !important;
+}
+.dashboard-v2 .dashboard-eyebrow { color: var(--bus-deep) !important; }
+.dashboard-v2 .dashboard-hero h1 { color: var(--navy) !important; }
+.dashboard-v2 .dashboard-hero .sub, .dashboard-hero-meta { color: #5E5440 !important; }
+.dashboard-hero-meta > span, .dashboard-hero-meta { background: transparent; }
+
+/* ---------- 카드 공통 ---------- */
+.dashboard-panel, .overview-kpi, .dashboard-urgent {
+  border-radius: 20px !important; border-color: var(--cream-line) !important; box-shadow: 0 2px 0 rgba(38,48,86,.04) !important;
+}
+.dashboard-panel { background: #fff !important; }
+.dashboard-v2 .overview-kpi.blue strong { color: var(--navy) !important; }
+.dashboard-v2 .overview-kpi.blue .overview-kpi-icon { background: var(--bus-soft) !important; color: var(--navy) !important; }
+.overview-kpi-icon { border-radius: 14px !important; }
+.dashboard-title-icon { background: var(--bus-soft) !important; color: var(--navy) !important; border-radius: 12px !important; }
+.dashboard-bus-icon, .dashboard-feed-icon.bus { background: var(--bus-soft) !important; color: var(--navy) !important; border-radius: 12px !important; }
+.dashboard-fleet-table-head { background: #FFFAEE !important; border-radius: 12px !important; }
+
+/* ---------- 링크·버튼·탭 ---------- */
+.dashboard-panel-head a, .dashboard-urgent-head a { color: var(--bus-deep) !important; }
+.seg { border-color: var(--cream-line) !important; border-radius: 12px !important; }
+.seg button[aria-pressed="true"], .seg button.active { background: var(--bus) !important; color: var(--navy) !important; }
+.btn { border-radius: 12px !important; }
+.btn.primary { background: var(--bus) !important; border-color: var(--bus) !important; color: var(--navy) !important; }
+.btn.primary:hover { background: #F5BA26 !important; }
+
+/* ---------- 차트 ---------- */
+.chart-legend-trip { background: #F2B52B !important; }
+.bar-trip { fill: var(--navy) !important; }
+.dashboard-chart-content rect.bar-trip { fill: #F2B52B !important; }
+
+/* ---------- 대시보드 KPI 카드: 색 줄 제거 + 누르면 아래로 요약 펼침 ---------- */
+.dashboard-v2 .overview-kpi {
+  width: 100%; font: inherit; text-align: left; cursor: pointer; color: inherit;
+  background: #fff !important; border: 1.5px solid var(--cream-line) !important; /* 위쪽 색 줄 없음 */
+}
+.dashboard-v2 .overview-kpi:hover { border-color: #E9CF8C !important; }
+.dashboard-v2 .overview-kpi:focus-visible { outline: 3px solid var(--bus); outline-offset: 2px; }
+.dashboard-v2 .overview-kpi.is-open {
+  border-color: #E9CF8C !important; border-bottom-color: transparent !important;
+  border-bottom-left-radius: 0 !important; border-bottom-right-radius: 0 !important;
+  background: #FFFBEF !important; box-shadow: none !important; transform: none !important;
+}
+.dashboard-v2 .dashboard-kpis:has(.is-open) { margin-bottom: 0 !important; }
+.dashboard-v2 .overview-kpi-top { display: flex !important; justify-content: space-between; align-items: flex-start; width: 100%; }
+.overview-kpi-toggle { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; background: #F6F1E4; color: var(--navy); transition: transform .25s ease, background-color .2s; }
+.overview-kpi.is-open .overview-kpi-toggle { transform: rotate(180deg); background: var(--bus); }
+.dashboard-v2 .overview-kpi.success .overview-kpi-toggle { position: absolute; top: 22px; right: 22px; }
+.dashboard-v2 .overview-kpi.success .overview-rate-ring { top: auto !important; bottom: 18px; }
+
+.kpi-detail { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .32s ease, margin .32s ease; margin: 0; }
+.kpi-detail.open { grid-template-rows: 1fr; margin: 0 0 22px; }
+.kpi-detail-inner { overflow: hidden; min-height: 0; }
+.kpi-detail-card {
+  position: relative; background: #FFFBEF; border: 1.5px solid #E9CF8C; border-radius: 20px; padding: 20px 22px 14px;
+  opacity: 0; transition: opacity .2s ease;
+}
+.kpi-detail.open .kpi-detail-card { opacity: 1; }
+.kpi-detail-card.tab-first { border-top-left-radius: 0; }
+.kpi-detail-card.tab-last { border-top-right-radius: 0; }
+/* 열린 박스 바로 아래의 윗선을 지워 박스와 요약 창이 한 덩어리로 이어지게 */
+.kpi-detail-card::before {
+  content: ""; position: absolute; top: -1.5px; height: 1.5px;
+  left: var(--tab-left, 0px); width: var(--tab-w, 0px); background: #FFFBEF;
+}
+.kpi-detail-row:hover { background: #FFF3D6; }
+.kpi-detail-card h3 { margin: 0 0 12px; font-size: 16px; color: var(--navy); }
+.kpi-detail-card h3 span { margin-left: 6px; font-size: 13px; font-weight: 600; color: var(--bus-deep); }
+.kpi-detail-list { display: flex; flex-direction: column; }
+.kpi-detail-row { display: flex; align-items: center; gap: 12px; padding: 12px 6px; border-top: 1px solid #F3EADA; text-decoration: none; color: var(--navy); border-radius: 10px; }
+.kpi-detail-row:first-child { border-top: 0; }
+.kpi-detail-row:hover { background: #FFF8E6; }
+.kpi-detail-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.kpi-detail-main strong { font-size: 14px; }
+.kpi-detail-main small { font-size: 12px; color: #6B6250; }
+.kpi-detail-tags { display: flex; gap: 6px; flex: none; }
+.kpi-detail-chev { color: #B8A98A; font-size: 20px; }
+.kpi-detail-empty { margin: 4px 0 8px; padding: 18px; text-align: center; color: #6B6250; background: #FFFBF1; border-radius: 12px; font-size: 14px; }
+.kpi-detail-foot { display: flex; justify-content: flex-end; padding-top: 10px; margin-top: 6px; border-top: 1px solid #F3EADA; }
+.kpi-detail-foot a { color: var(--bus-deep); font-size: 13px; font-weight: 700; text-decoration: none; }
+.kpi-detail-foot a:hover { text-decoration: underline; }
+.kpi-rate { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 8px; }
+.kpi-rate-row { display: grid; grid-template-columns: 110px 1fr 48px 44px; align-items: center; gap: 12px; font-size: 14px; }
+.kpi-rate-label { display: flex; align-items: center; gap: 8px; }
+.kpi-rate-label i { width: 10px; height: 10px; border-radius: 50%; }
+.kpi-rate-bar { height: 10px; border-radius: 99px; background: #F3EEE2; overflow: hidden; }
+.kpi-rate-bar span { display: block; height: 100%; border-radius: 99px; }
+.kpi-rate .normal { background: #24815B; } .kpi-rate .check { background: #E8AC19; } .kpi-rate .missed { background: #DC404C; }
+.kpi-rate-row strong { text-align: right; } .kpi-rate-row small { color: #6B6250; text-align: right; }
+@media (prefers-reduced-motion: reduce) { .kpi-detail, .kpi-detail-card, .overview-kpi-toggle { transition: none; } }
+
+/* ---------- 박스와 요약 창 이음부: 안쪽으로 둥글게 ---------- */
+.dashboard-v2 .overview-kpi.is-open { position: relative; z-index: 2; overflow: visible !important; }
+.dashboard-v2 .overview-kpi.is-open::before,
+.dashboard-v2 .overview-kpi.is-open::after {
+  content: ""; position: absolute; bottom: -2px; width: 20px; height: 20px; pointer-events: none;
+}
+/* 왼쪽 이음부 */
+.dashboard-v2 .overview-kpi.is-open:not(.tab-first)::before {
+  left: -20px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cpath d='M19.25 0A19.25 19.25 0 0 1 0 19.25V20H20V0Z' fill='%23FFFBEF'/%3E%3Cpath d='M19.25 0A19.25 19.25 0 0 1 0 19.25' fill='none' stroke='%23E9CF8C' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat;
+}
+/* 오른쪽 이음부 */
+.dashboard-v2 .overview-kpi.is-open:not(.tab-last)::after {
+  right: -20px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cpath d='M0.75 0A19.25 19.25 0 0 0 20 19.25V20H0V0Z' fill='%23FFFBEF'/%3E%3Cpath d='M0.75 0A19.25 19.25 0 0 0 20 19.25' fill='none' stroke='%23E9CF8C' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat;
+}
+.kpi-detail { position: relative; z-index: 1; }
+
+/* ---------- 사람 손을 탄 느낌: 장식 줄이기 ---------- */
+/* 히어로: 영어 문구 대신 날짜, 오늘 숫자로 만든 한 줄 */
+.dashboard-v2 .dashboard-hero { padding: 26px 30px !important; min-height: 0 !important; }
+.dashboard-date { margin: 0 0 4px; font-size: 14px; font-weight: 700; color: var(--bus-deep); }
+.dashboard-v2 .dashboard-hero .sub { margin-top: 8px !important; font-size: 15px !important; color: var(--navy) !important; }
+.dashboard-scope { margin: 6px 0 0; font-size: 12px; color: #8A7F66; }
+.dashboard-v2 .dashboard-hero-art { width: 240px; height: 120px; display: flex; align-items: center; justify-content: flex-end; }
+.dashboard-v2 .dashboard-hero-art img { height: 100%; width: auto; display: block; }
+.dashboard-hero-meta { display: none !important; }
+
+/* 경고 띠: 이모지 대신 작은 점 */
+.dash-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #D93B3B; margin-right: 8px; vertical-align: 2px; }
+
+/* KPI 아이콘: 색색의 타일 대신 한 가지 톤 */
+.dashboard-v2 .overview-kpi .overview-kpi-icon { background: #FFF4D6 !important; color: var(--navy) !important; }
+
+/* 패널 제목: 아이콘 타일·설명 문구 없이 제목만 */
+.dashboard-v2 .dashboard-panel-head { align-items: center !important; }
+.dashboard-v2 .dashboard-panel-head h2 { margin: 0 !important; font-size: 17px !important; }
+.dashboard-v2 .dashboard-panel-head p:empty { display: none; }
+.dashboard-v2 .dashboard-panel-head a { font-weight: 600 !important; }
+
+/* 목록 줄: 줄마다 붙던 아이콘 칸 없이 */
+.dashboard-v2 .dashboard-fleet-row { grid-template-columns: minmax(0,1.4fr) minmax(0,.8fr) auto auto !important; }
+.dashboard-v2 .dashboard-fleet-table-head { grid-template-columns: minmax(0,1.4fr) minmax(0,.8fr) auto !important; }
+.dashboard-v2 .dashboard-feed-row { padding-left: 14px !important; }
+
+
+/* 2026-11 dashboard refinements: keep existing API and interactions intact */
+.rail .brand .rail-brand-name { min-width:0; font-size:16px; font-weight:800; line-height:1.35; letter-spacing:-.45px; overflow-wrap:keep-all; color:#fff; }
+.rail .brand .brand-mark { flex:0 0 38px; background-image:url('tonghaki_side_bus.svg') !important; }
+.dashboard-v2 .dashboard-hero { display:flex !important; align-items:center; gap:20px; overflow:hidden; }
+.dashboard-v2 .dashboard-hero-copy { position:relative; z-index:1; flex:1 1 0; min-width:0; }
+.dashboard-v2 .dashboard-hero-art { position:static !important; flex:0 1 240px; width:min(32%,240px) !important; height:125px !important; min-width:0; overflow:visible; opacity:1; pointer-events:none; }
+.dashboard-v2 .dashboard-hero-art img { display:block; width:100% !important; height:100% !important; object-fit:contain; object-position:center right; }
+.dashboard-v2 .dashboard-kpis .overview-kpi { align-items:center !important; text-align:center; min-width:0; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-top { width:100%; display:flex; justify-content:center; align-items:center; position:relative; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-toggle { position:absolute; right:0; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-label { font-size:16px; }
+.dashboard-v2 .dashboard-kpis .overview-kpi strong { font-size:35px; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-note { max-width:100%; text-align:center; font-size:12px; }
+.dashboard-v2 .dashboard-kpis .overview-rate-ring { align-self:center; }
+.dashboard-v2 .dashboard-fleet-table-head,
+.dashboard-v2 .dashboard-fleet-row { grid-template-columns:minmax(0,1.5fr) minmax(78px,.8fr) minmax(76px,.8fr) !important; gap:8px; align-items:center; }
+.dashboard-v2 .dashboard-fleet-table-head { padding:13px 10px; }
+.dashboard-v2 .dashboard-fleet-assigned { white-space:normal; }
+.dashboard-v2 .dashboard-fleet-row .bus-status { justify-self:start; }
+@media(max-width:850px) {
+  .dashboard-v2 .dashboard-hero-art { display:flex !important; flex-basis:180px; height:110px !important; }
+}
+@media(max-width:580px) {
+  .dashboard-v2 .dashboard-hero { gap:10px; padding:20px !important; }
+  .dashboard-v2 .dashboard-hero-art { flex-basis:100px; width:100px !important; height:90px !important; }
+  .dashboard-v2 .dashboard-hero .sub { font-size:13px !important; }
+  .dashboard-v2 .dashboard-fleet-table-head { display:grid !important; font-size:10px; }
+  .dashboard-v2 .dashboard-fleet-row { grid-template-columns:minmax(0,1.5fr) minmax(65px,.8fr) minmax(65px,.8fr) !important; }
+  .dashboard-v2 .dashboard-fleet-assigned { display:block !important; font-size:11px; }
+  .dashboard-v2 .dashboard-fleet-list { padding-left:8px; padding-right:8px; }
+  .dashboard-v2 .dashboard-fleet-table-head { margin-left:8px; margin-right:8px; }
+}
+@media(max-width:400px) { .dashboard-v2 .dashboard-hero-art { display:none !important; } }
+
+/* Dashboard requested corrections - authoritative overrides */
+.dashboard-v2 .dashboard-hero { position:relative; display:flex !important; align-items:center; min-height:180px; gap:16px; overflow:hidden; }
+.dashboard-v2 .dashboard-hero-copy { flex:1 1 52%; min-width:0; position:relative; z-index:2; }
+.dashboard-v2 .dashboard-hero-art { position:relative !important; display:flex !important; flex:0 1 42% !important; width:42% !important; height:160px !important; min-width:0; align-items:center; justify-content:flex-end; }
+.dashboard-v2 .dashboard-hero-art img { width:100% !important; height:100% !important; max-width:480px; object-fit:contain !important; object-position:right center; }
+.dashboard-v2 .dashboard-fleet-table-head,
+.dashboard-v2 .dashboard-fleet-list .dashboard-fleet-row { display:grid !important; grid-template-columns:minmax(0,1.5fr) minmax(78px,.8fr) minmax(82px,.8fr) !important; column-gap:10px !important; align-items:center !important; }
+.dashboard-v2 .dashboard-fleet-table-head { padding:12px 12px !important; }
+.dashboard-v2 .dashboard-fleet-list .dashboard-fleet-row { padding:12px !important; }
+.dashboard-v2 .dashboard-fleet-info { grid-column:1 !important; display:flex !important; flex-direction:column !important; align-items:flex-start !important; gap:3px; min-width:0; }
+.dashboard-v2 .dashboard-fleet-info strong,.dashboard-v2 .dashboard-fleet-info small { display:block !important; margin:0 !important; }
+.dashboard-v2 .dashboard-fleet-assigned { grid-column:2 !important; display:block !important; white-space:nowrap !important; }
+.dashboard-v2 .dashboard-fleet-list .bus-status { grid-column:3 !important; justify-self:start !important; white-space:nowrap !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi { display:flex !important; flex-direction:column !important; align-items:center !important; justify-content:center !important; text-align:center !important; cursor:pointer !important; min-height:168px; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-top { display:flex !important; justify-content:center !important; width:100% !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-label { font-size:16px !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi > strong { font-size:35px !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-note { max-width:100% !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-toggle { display:grid !important; position:absolute !important; top:14px !important; right:14px !important; opacity:1 !important; }
+.dashboard-v2 .dashboard-kpis:has(.is-open) .overview-kpi > * { zoom:1 !important; }
+.dashboard-v2 .dashboard-kpis:has(.is-open) .overview-kpi { min-height:168px !important; }
+.dashboard-v2 .kpi-detail.open { display:grid !important; grid-template-rows:1fr !important; margin-bottom:22px !important; }
+.dashboard-v2 .kpi-detail.open .kpi-detail-card { opacity:1 !important; }
+.dashboard-v2 .overview-kpi.success .overview-rate-ring { position:static !important; margin-top:10px !important; }
+@media(max-width:800px) { .dashboard-v2 .dashboard-hero-art { flex-basis:38% !important; width:38% !important; height:125px !important; } }
+@media(max-width:580px) {
+ .dashboard-v2 .dashboard-hero-art { flex:0 1 38% !important; width:38% !important; height:105px !important; }
+ .dashboard-v2 .dashboard-fleet-table-head,.dashboard-v2 .dashboard-fleet-list .dashboard-fleet-row { grid-template-columns:minmax(0,1.5fr) minmax(62px,.8fr) minmax(65px,.8fr) !important; column-gap:5px !important; }
+ .dashboard-v2 .dashboard-fleet-table-head,.dashboard-v2 .dashboard-fleet-list .dashboard-fleet-row { padding:9px 6px !important; }
+}
+@media(max-width:400px) { .dashboard-v2 .dashboard-hero-art { display:flex !important; height:80px !important; } }
+
+
+/* 2026-11-23 dashboard layout repairs: keep four KPI cards identical */
+.dashboard-v2 .dashboard-kpis { display:grid !important; grid-template-columns:repeat(4,minmax(0,1fr)) !important; align-items:stretch !important; gap:12px !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi,
+.dashboard-v2 .dashboard-kpis:has(.is-open) .overview-kpi,
+.dashboard-v2 .dashboard-kpis:has(.is-open) .overview-kpi.is-open {
+  box-sizing:border-box !important; height:170px !important; min-height:170px !important; max-height:170px !important;
+  padding:18px 12px !important; align-self:stretch !important; justify-content:center !important;
+  opacity:1 !important; overflow:hidden !important; border-radius:16px !important;
+}
+.dashboard-v2 .dashboard-kpis .overview-kpi > *,
+.dashboard-v2 .dashboard-kpis:has(.is-open) .overview-kpi > * { zoom:1 !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-top { flex:0 0 auto; margin:0 0 6px !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-label { font-size:14px !important; line-height:1.35 !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi > strong { display:block !important; font-size:31px !important; line-height:1.3 !important; margin:4px 0 0 !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi-note { font-size:11px !important; line-height:1.4 !important; margin-top:5px !important; }
+.dashboard-v2 .dashboard-kpis .overview-kpi.success .overview-kpi-icon,
+.dashboard-v2 .dashboard-kpis .overview-kpi.success .overview-kpi-label,
+.dashboard-v2 .dashboard-kpis .overview-kpi.success > strong,
+.dashboard-v2 .dashboard-kpis .overview-kpi.success .overview-kpi-note { visibility:visible !important; opacity:1 !important; }
+.dashboard-v2 .dashboard-kpis .overview-rate-ring { display:none !important; }
+/* No attached/elongated tab effect: summary is independent beneath all four cards */
+.dashboard-v2 .overview-kpi.is-open::before,.dashboard-v2 .overview-kpi.is-open::after,
+.dashboard-v2 .kpi-detail-card::before { display:none !important; }
+.dashboard-v2 .kpi-detail-card,.dashboard-v2 .kpi-detail-card.tab-first,.dashboard-v2 .kpi-detail-card.tab-last { border-radius:16px !important; }
+.dashboard-v2 .kpi-detail { margin-top:0 !important; }
+.dashboard-v2 .kpi-detail.open { margin-top:12px !important; margin-bottom:16px !important; }
+/* Avoid excessively tall blank results card while retaining chart and labels */
+.dashboard-v2 .dashboard-bottom-grid { align-items:start !important; }
+.dashboard-v2 .dashboard-bottom-grid > .dashboard-results-panel { min-height:0 !important; height:auto !important; }
+.dashboard-v2 .dashboard-results-panel .dashboard-panel-head { min-height:0 !important; padding-bottom:8px !important; }
+.dashboard-v2 .dashboard-results-panel .overview-distribution { padding-bottom:16px !important; }
+/* Bus art never overlays heading or description at narrow viewport widths */
+.dashboard-v2 .dashboard-hero { display:flex !important; flex-wrap:nowrap !important; gap:20px !important; }
+.dashboard-v2 .dashboard-hero-copy { flex:1 1 0 !important; min-width:0 !important; }
+.dashboard-v2 .dashboard-hero-art { flex:0 1 38% !important; width:38% !important; max-width:390px !important; min-width:0 !important; }
+@media(max-width:1100px) {
+ .dashboard-v2 .dashboard-kpis { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+}
+@media(max-width:700px) {
+ .dashboard-v2 .dashboard-hero { flex-direction:column !important; align-items:stretch !important; gap:8px !important; padding:20px !important; }
+ .dashboard-v2 .dashboard-hero-copy { flex:auto !important; width:100% !important; }
+ .dashboard-v2 .dashboard-hero-art { align-self:flex-end !important; flex:0 0 auto !important; width:min(65%,260px) !important; max-width:260px !important; height:110px !important; margin-top:0 !important; }
+ .dashboard-v2 .dashboard-hero-art img { width:100% !important; height:100% !important; object-fit:contain !important; }
+ .dashboard-v2 .dashboard-kpis { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+ .dashboard-v2 .dashboard-kpis .overview-kpi,.dashboard-v2 .dashboard-kpis:has(.is-open) .overview-kpi,.dashboard-v2 .dashboard-kpis:has(.is-open) .overview-kpi.is-open { height:155px !important; min-height:155px !important; max-height:155px !important; padding:12px 8px !important; }
+ .dashboard-v2 .dashboard-kpis .overview-kpi-label { font-size:12px !important; }
+ .dashboard-v2 .dashboard-kpis .overview-kpi > strong { font-size:27px !important; }
+ .dashboard-v2 .dashboard-kpis .overview-kpi-note { font-size:10px !important; }
+}
+@media(max-width:380px) {
+ .dashboard-v2 .dashboard-hero-art { width:min(70%,210px) !important; height:90px !important; }
+ .dashboard-v2 .dashboard-kpis { gap:8px !important; }
+ .dashboard-v2 .dashboard-kpis .overview-kpi-toggle { right:7px !important; top:7px !important; }
+}
+
+/* 2026-11-23: definitive responsive hero + equal-height results row */
+.dashboard-v2 .dashboard-hero {
+  position:relative !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:space-between !important;
+  gap:24px !important;
+  height:auto !important;
+  min-height:150px !important;
+}
+.dashboard-v2 .dashboard-hero-copy {
+  position:relative !important;
+  z-index:1 !important;
+  flex:1 1 58% !important;
+  min-width:0 !important;
+  width:auto !important;
+}
+.dashboard-v2 .dashboard-hero-art {
+  position:relative !important;
+  top:auto !important; right:auto !important; bottom:auto !important; left:auto !important;
+  transform:none !important;
+  z-index:0 !important;
+  display:flex !important;
+  flex:0 1 36% !important;
+  width:36% !important;
+  max-width:340px !important;
+  min-width:0 !important;
+  height:120px !important;
+  margin:0 !important;
+  align-items:center !important;
+  justify-content:center !important;
+}
+.dashboard-v2 .dashboard-hero-art img {
+  display:block !important;
+  width:100% !important;
+  height:100% !important;
+  max-width:100% !important;
+  object-fit:contain !important;
+}
+@media (max-width:900px) {
+  .dashboard-v2 .dashboard-hero {
+    flex-direction:column !important;
+    align-items:stretch !important;
+    justify-content:flex-start !important;
+    gap:10px !important;
+    padding:20px !important;
+  }
+  .dashboard-v2 .dashboard-hero-copy { flex:0 0 auto !important; width:100% !important; }
+  .dashboard-v2 .dashboard-hero-art {
+    position:relative !important;
+    flex:0 0 auto !important;
+    align-self:flex-end !important;
+    width:min(70%,260px) !important;
+    max-width:260px !important;
+    height:115px !important;
+    margin:0 !important;
+  }
+}
+@media (max-width:480px) {
+  .dashboard-v2 .dashboard-hero-art { width:min(75%,220px) !important; height:100px !important; }
+  .dashboard-v2 .dashboard-hero-copy h1 { overflow-wrap:anywhere !important; }
+}
+
+/* 운행 결과 현황: 기존 카드 높이를 유지하고 내부 요소를 균형 배치 */
+.dashboard-v2 .dashboard-bottom-grid {
+  align-items: stretch;
+}
+.dashboard-v2 .dashboard-bottom-grid > .dashboard-results-panel {
+  min-height: 250px;
+  height: auto;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+.dashboard-v2 .dashboard-results-panel .dashboard-panel-head {
+  flex: 0 0 auto;
+  min-height: 0 !important;
+  padding-bottom: 8px !important;
+}
+.dashboard-v2 .dashboard-results-panel .overview-distribution {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  padding: 8px 18px 20px !important;
+  transform: none !important;
+}
+.dashboard-v2 .dashboard-results-panel .overview-distribution-body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  margin: 0 !important;
+}
+.dashboard-v2 .dashboard-results-panel .overview-donut {
+  width: clamp(100px, 42%, 140px);
+  height: auto;
+  aspect-ratio: 1;
+  flex: 0 0 auto;
+}
+.dashboard-v2 .dashboard-results-panel .overview-donut-legend {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dashboard-v2 .dashboard-results-panel .dashboard-result-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+}
+.dashboard-v2 .dashboard-results-panel .dashboard-result-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 88px;
+  padding: 10px 2px;
+  box-sizing: border-box;
+  background: #f7f8fa;
+  border-radius: 12px;
+}
+.dashboard-v2 .dashboard-results-panel .dashboard-result-stat small {
+  font-size: 11px;
+  color: #68748a;
+  white-space: nowrap;
+}
+.dashboard-v2 .dashboard-results-panel .dashboard-result-stat strong {
+  font-size: 22px;
+  font-weight: 800;
+}
+.dashboard-v2 .dashboard-results-panel .dashboard-result-stat.normal strong { color: #24815b; }
+.dashboard-v2 .dashboard-results-panel .dashboard-result-stat.check strong { color: #b78100; }
+.dashboard-v2 .dashboard-results-panel .dashboard-result-stat.missed strong { color: #dc404c; }
+@media (max-width: 380px) {
+  .dashboard-v2 .dashboard-results-panel .overview-distribution-body { gap: 10px; }
+  .dashboard-v2 .dashboard-results-panel .overview-donut { width: 40%; }
+  .dashboard-v2 .dashboard-results-panel .dashboard-result-stat small { font-size: 10px; }
+  .dashboard-v2 .dashboard-results-panel .dashboard-result-stat strong { font-size: 18px; }
+}
+
+
+/* =====================================================================
+   2026-11-23 (최종) 박스 펼침: 누른 박스는 그대로, 나머지는 내용까지 같은 비율로 작게,
+   누른 박스와 요약 창은 둥근 이음부로 한 덩어리처럼 이어짐.
+   — 이 블록이 파일 맨 끝에 있어야 위의 규칙들을 덮어씀
+   ===================================================================== */
+/* 1) 누른 박스는 크기 그대로, 그 아랫선에 요약 창 윗선이 바로 맞물림.
+      옆 박스들은 내용·여백까지 같은 비율로 조금 작아져서 위쪽에 붙고,
+      요약 창과의 사이에 틈이 생겨 둥근 이음부가 옆 박스와 겹치지 않음 */
+/* --kpi-s: 박스 안 내용·여백·높이를 함께 키우고 줄이는 배율.
+   숫자형 변수로 등록해 두면 transition 으로 부드럽게 변해서 글자도 자연스럽게 커지고 작아짐 */
+@property --kpi-s { syntax: '<number>'; inherits: true; initial-value: 1; }
+html body .dashboard-v2 .dashboard-kpis .overview-kpi.overview-kpi.overview-kpi {
+  --kpi-s: 1;
+  height: calc(170px * var(--kpi-s)) !important; min-height: 0 !important; max-height: none !important;
+  padding: calc(18px * var(--kpi-s)) calc(12px * var(--kpi-s)) !important;
+  transition: --kpi-s .32s ease, opacity .25s ease, border-color .2s ease, background-color .2s ease !important;
+}
+html body .dashboard-v2 .dashboard-kpis .overview-kpi.overview-kpi.overview-kpi > * { zoom: var(--kpi-s) !important; }
+/* 하나가 열리면 옆 박스만 조금 작게 (누른 박스는 1 그대로) */
+html body .dashboard-v2 .dashboard-kpis:has(.is-open.attached) { align-items: start !important; }
+/* 옆 박스 배율 = (박스 높이 - 박스 사이 간격) / 박스 높이
+   → 옆 박스 아래와 요약 창 사이 틈이 박스끼리의 간격과 똑같아짐 */
+html body .dashboard-v2 .dashboard-kpis:has(.is-open.attached) .overview-kpi.overview-kpi:not(.is-open) {
+  --kpi-s: calc((170 - 12) / 170); align-self: start !important; opacity: .85 !important;
+}
+@media (max-width: 1100px) {
+  html body .dashboard-v2 .dashboard-kpis:has(.is-open.attached) .overview-kpi.overview-kpi:not(.is-open) { --kpi-s: calc((170 - 10) / 170); }
+}
+@media (max-width: 700px) {
+  html body .dashboard-v2 .dashboard-kpis:has(.is-open.attached) .overview-kpi.overview-kpi:not(.is-open) { --kpi-s: calc((132 - 6) / 132); }
+}
+html body .dashboard-v2 .dashboard-kpis:has(.is-open.attached) .overview-kpi.overview-kpi:not(.is-open):hover { opacity: 1 !important; }
+
+/* 창이 좁아져도 박스 4개는 한 줄 유지 (박스만 좁아짐) */
+html body .dashboard-v2 .dashboard-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+@media (max-width: 1100px) {
+  html body .dashboard-v2 .dashboard-kpis { gap: 10px !important; }
+  html body .dashboard-v2 .dashboard-kpis .overview-kpi-label { font-size: 13px !important; }
+  html body .dashboard-v2 .dashboard-kpis .overview-kpi > strong { font-size: 26px !important; }
+  html body .dashboard-v2 .dashboard-kpis .overview-kpi-toggle { top: 10px !important; right: 10px !important; width: 26px !important; height: 26px !important; }
+}
+@media (max-width: 700px) {
+  html body .dashboard-v2 .dashboard-kpis { gap: 6px !important; }
+  html body .dashboard-v2 .dashboard-kpis .overview-kpi.overview-kpi.overview-kpi { height: calc(132px * var(--kpi-s)) !important; padding: calc(12px * var(--kpi-s)) calc(4px * var(--kpi-s)) !important; }
+  html body .dashboard-v2 .dashboard-kpis .overview-kpi-label { font-size: 11px !important; }
+  html body .dashboard-v2 .dashboard-kpis .overview-kpi > strong { font-size: 20px !important; }
+  html body .dashboard-v2 .dashboard-kpis .overview-kpi-note { display: none !important; }
+  html body .dashboard-v2 .dashboard-kpis .overview-kpi-icon { width: 30px !important; height: 30px !important; }
+  html body .dashboard-v2 .dashboard-kpis .overview-kpi-toggle { top: 6px !important; right: 6px !important; width: 22px !important; height: 22px !important; }
+}
+
+/* 2) 누른 박스: 크기 그대로, 강조 */
+.dashboard-v2 .dashboard-kpis .overview-kpi.is-open {
+  background: #FFFBEF !important; border-color: #E9CF8C !important; opacity: 1 !important;
+}
+
+/* 3) 마지막 줄의 박스를 열면 요약 창과 붙음 */
+.dashboard-v2 .dashboard-kpis .overview-kpi.is-open.attached {
+  position: relative !important; z-index: 2 !important; overflow: visible !important;
+  border-bottom-color: transparent !important;
+  border-bottom-left-radius: 0 !important; border-bottom-right-radius: 0 !important;
+}
+.dashboard-v2 .kpi-detail.open.attached { margin-top: 0 !important; position: relative; z-index: 1; }
+.dashboard-v2 .kpi-detail-card { background: #FFFBEF !important; border: 1.5px solid #E9CF8C !important; }
+.dashboard-v2 .kpi-detail-card.attached.tab-first { border-top-left-radius: 0 !important; }
+.dashboard-v2 .kpi-detail-card.attached.tab-last { border-top-right-radius: 0 !important; }
+/* 박스 바로 아래 요약 창 윗선 지우기 */
+.dashboard-v2 .kpi-detail-card.attached::before {
+  display: block !important; content: ""; position: absolute; top: -1.5px; height: 1.5px;
+  left: var(--tab-left, 0px); width: var(--tab-w, 0px); background: #FFFBEF;
+}
+/* 박스 옆선 → 요약 창 윗선으로 둥글게 이어지는 부분 (반지름 16px = 박스 모서리와 같음) */
+.dashboard-v2 .dashboard-kpis .overview-kpi.is-open.attached::before,
+.dashboard-v2 .dashboard-kpis .overview-kpi.is-open.attached::after {
+  display: block !important; content: ""; position: absolute; bottom: -2px; width: 16px; height: 16px; pointer-events: none;
+}
+.dashboard-v2 .dashboard-kpis .overview-kpi.is-open.attached:not(.tab-first)::before { left: -16px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M15.25 0A15.25 15.25 0 0 1 0 15.25V16H16V0Z' fill='%23FFFBEF'/%3E%3Cpath d='M15.25 0A15.25 15.25 0 0 1 0 15.25' fill='none' stroke='%23E9CF8C' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat; }
+.dashboard-v2 .dashboard-kpis .overview-kpi.is-open.attached:not(.tab-last)::after { right: -16px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M0.75 0A15.25 15.25 0 0 0 16 15.25V16H0V0Z' fill='%23FFFBEF'/%3E%3Cpath d='M0.75 0A15.25 15.25 0 0 0 16 15.25' fill='none' stroke='%23E9CF8C' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat; }
+.dashboard-v2 .dashboard-kpis .overview-kpi.is-open.attached.tab-first::before,
+.dashboard-v2 .dashboard-kpis .overview-kpi.is-open.attached.tab-last::after { display: none !important; }
+
+/* =====================================================================
+   버스별 현재 상태: 왼쪽·오른쪽·위아래 여백을 같은 값으로 맞춤
+   (이름 | 배정 학생 | 운행 상태) 세 칸, 상태 뱃지는 오른쪽 끝에 붙여 좌우 여백을 대칭으로
+   ===================================================================== */
+.dashboard-v2 .dashboard-fleet-panel { --fleet-x: 14px; --fleet-y: 14px; --fleet-edge: 8px; } /* 글자 시작 = 8+14 = 22px = 패널 제목과 같은 선 */
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-table-head,
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-list .dashboard-fleet-row {
+  grid-template-columns: minmax(0, 1fr) 88px 72px !important;
+  column-gap: 16px !important;
+  padding: var(--fleet-y) var(--fleet-x) !important;
+}
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-table-head { padding-top: 10px !important; padding-bottom: 10px !important; margin: 0 var(--fleet-edge) 4px !important; border-radius: 12px !important; }
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-list { padding: 0 !important; margin: 0 var(--fleet-edge) var(--fleet-edge) !important; }
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-table-head > :last-child,
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-list .bus-status { justify-self: end !important; text-align: right; }
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-table-head > :nth-child(2),
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-assigned { justify-self: start !important; }
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-list .dashboard-fleet-row { min-height: 0 !important; }
+.dashboard-v2 .dashboard-fleet-panel .dashboard-fleet-info small { margin-top: 2px !important; }
+
+/* 아래 목록 줄: 오른쪽 뱃지가 테두리에 붙지 않게 좌우 여백을 같게 */
+.dashboard-v2 .dashboard-bottom-grid .dashboard-feed-row { padding: 12px 14px !important; gap: 10px; }
+.dashboard-v2 .dashboard-bottom-grid .dashboard-feed-tags { flex: none; align-items: flex-end; }
+
+
+/* =====================================================================
+   관리 페이지 공통 정리 (운행·경고·연결 요청·학생·보호자·버스·배정)
+   - 상단 요약 박스: 색 줄 없이 대시보드와 같은 흰 박스, 내용 가운데 정렬
+   - 버튼·검색창·선택 상자: 한 가지 모양으로 통일
+   - 창이 좁아져도 요약 박스 열 개수는 그대로
+   ===================================================================== */
+html body #view {
+  --ui-line: #EFE2C4; --ui-line-strong: #E4D3AA; --ui-soft: #FFF8E6;
+  --ui-navy: #263056; --ui-bus: #FFC83D; --ui-muted: #7A6E52;
+}
+
+/* ---------- 1. 상단 요약 박스 ---------- */
+html body #view .trip-summary, html body #view .alert-summary-grid, html body #view .request-summary-grid,
+html body #view .student-summary-grid, html body #view .bus-summary-grid {
+  display: grid !important; gap: 12px !important;
+}
+html body #view .trip-summary, html body #view .request-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+html body #view .alert-summary-grid, html body #view .student-summary-grid, html body #view .bus-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+
+html body #view :is(.trip-summary-card, .alert-summary-card, .request-summary-card, .student-summary-card, .bus-summary-card) {
+  position: relative; display: flex !important; flex-direction: column !important;
+  align-items: center !important; justify-content: center !important; text-align: center !important;
+  gap: 4px; min-width: 0; min-height: 150px; padding: 20px 12px !important;
+  background: #fff !important; border: 1.5px solid var(--ui-line) !important; border-radius: 16px !important;
+  box-shadow: none !important;
+}
+/* 위쪽 색 줄(테두리·가상 요소 모두) 제거 */
+html body #view :is(.trip-summary-card, .alert-summary-card, .request-summary-card, .student-summary-card, .bus-summary-card)::before,
+html body #view :is(.trip-summary-card, .alert-summary-card, .request-summary-card, .student-summary-card, .bus-summary-card)::after { display: none !important; }
+/* 라벨 줄: 장식 아이콘은 빼고 라벨만 가운데 */
+html body #view :is(.alert-summary-top, .student-summary-label, .bus-summary-label) {
+  display: flex !important; justify-content: center !important; width: 100%; margin: 0 !important;
+}
+html body #view :is(.alert-summary-icon, .student-summary-icon, .bus-summary-icon) { display: none !important; }
+html body #view :is(.trip-summary-label, .alert-summary-top, .request-summary-label, .student-summary-label, .bus-summary-label) {
+  font-size: 14px !important; font-weight: 700 !important; color: var(--ui-navy) !important;
+}
+html body #view :is(.trip-summary-value, .alert-summary-value, .request-summary-value, .student-summary-value, .bus-summary-value) {
+  display: flex; align-items: baseline; justify-content: center; gap: 3px;
+  font-size: 30px !important; line-height: 1.25 !important; margin: 4px 0 0 !important;
+}
+html body #view :is(.trip-summary-card, .alert-summary-card, .request-summary-card, .student-summary-card, .bus-summary-card) :is(p, .trip-summary-note) {
+  margin: 4px 0 0 !important; font-size: 12px !important; color: var(--ui-muted) !important; text-align: center !important;
+}
+@media (max-width: 1100px) {
+  html body #view :is(.trip-summary, .alert-summary-grid, .request-summary-grid, .student-summary-grid, .bus-summary-grid) { gap: 10px !important; }
+  html body #view :is(.trip-summary-value, .alert-summary-value, .request-summary-value, .student-summary-value, .bus-summary-value) { font-size: 26px !important; }
+}
+@media (max-width: 700px) {
+  html body #view :is(.trip-summary, .alert-summary-grid, .request-summary-grid, .student-summary-grid, .bus-summary-grid) { gap: 6px !important; }
+  html body #view :is(.trip-summary-card, .alert-summary-card, .request-summary-card, .student-summary-card, .bus-summary-card) { min-height: 104px; padding: 12px 4px !important; }
+  html body #view :is(.trip-summary-label, .alert-summary-top, .request-summary-label, .student-summary-label, .bus-summary-label) { font-size: 11px !important; }
+  html body #view :is(.trip-summary-value, .alert-summary-value, .request-summary-value, .student-summary-value, .bus-summary-value) { font-size: 20px !important; }
+  html body #view :is(.trip-summary-card, .alert-summary-card, .request-summary-card, .student-summary-card, .bus-summary-card) :is(p, .trip-summary-note) { display: none !important; }
+}
+
+/* ---------- 2. 입력·검색·선택 상자 ---------- */
+html body #view :is(input[type="text"], input[type="search"], input[type="email"], input[type="password"], input[type="date"], input[type="time"], input[type="number"], select, textarea) {
+  min-height: 42px; box-sizing: border-box; padding: 8px 12px !important;
+  background: #fff !important; color: var(--ui-navy) !important; font: inherit; font-size: 14px !important;
+  border: 1.5px solid var(--ui-line) !important; border-radius: 12px !important; box-shadow: none !important;
+}
+html body #view :is(input, select, textarea):focus { outline: none !important; border-color: var(--ui-bus) !important; box-shadow: 0 0 0 3px rgba(255,200,61,.25) !important; }
+html body #view :is(input, select, textarea):disabled { background: #F7F3EA !important; color: #9A9078 !important; }
+html body #view input[type="checkbox"], html body #view input[type="radio"] { accent-color: #F2B52B; width: 17px; height: 17px; }
+
+/* ---------- 3. 버튼: 기본(흰) · 주요(노랑) · 삭제(빨강 글씨) 세 가지만 ---------- */
+html body #view .btn,
+html body #view :is(.trip-record-detail, .trip-detail-link, .alert-detail-btn) {
+  display: inline-flex !important; align-items: center; justify-content: center; gap: 6px;
+  min-height: 42px; padding: 0 16px !important; box-sizing: border-box;
+  background: #fff !important; color: var(--ui-navy) !important;
+  border: 1.5px solid var(--ui-line-strong) !important; border-radius: 12px !important;
+  font: inherit; font-size: 14px !important; font-weight: 600 !important; text-decoration: none !important;
+  box-shadow: none !important; transform: none !important; cursor: pointer;
+}
+html body #view .btn.small { min-height: 36px; padding: 0 12px !important; font-size: 13px !important; }
+html body #view .btn:hover,
+html body #view :is(.trip-record-detail, .trip-detail-link, .alert-detail-btn):hover { background: var(--ui-soft) !important; }
+html body #view .btn.primary { background: var(--ui-bus) !important; border-color: var(--ui-bus) !important; color: var(--ui-navy) !important; }
+html body #view .btn.primary:hover { background: #F5BA26 !important; border-color: #F5BA26 !important; }
+html body #view .btn.danger { background: #fff !important; border-color: #F1C7C2 !important; color: #B4232F !important; }
+html body #view .btn.danger:hover { background: #FFF1EF !important; }
+html body #view .btn:disabled { opacity: .45 !important; cursor: not-allowed; }
+
+/* 상태 탭(전체·운행 중·운행 완료) */
+html body #view .trip-status-tab {
+  min-height: 38px; padding: 0 16px !important; border-radius: 12px !important;
+  background: #fff !important; color: var(--ui-navy) !important; border: 1.5px solid var(--ui-line) !important;
+  font-weight: 600 !important; box-shadow: none !important;
+}
+html body #view .trip-status-tab.active { background: var(--ui-bus) !important; border-color: var(--ui-bus) !important; color: var(--ui-navy) !important; }
+
+/* '학생 2명 보기' · '보호자 1명 보기' 펼침 버튼 */
+html body #view :is(.bus-student-details, .student-guardian-details) > summary {
+  display: inline-flex !important; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px !important;
+  background: #fff !important; color: var(--ui-navy) !important;
+  border: 1.5px solid var(--ui-line-strong) !important; border-radius: 12px !important;
+  font-size: 13px !important; font-weight: 600 !important; box-shadow: none !important;
+}
+html body #view :is(.bus-student-details, .student-guardian-details)[open] > summary { background: var(--ui-soft) !important; }
+
+/* 접었다 펴는 큰 상자(기사 등록 및 관리 등)의 제목 줄 */
+html body #view details > summary { color: var(--ui-navy); }
+
+/* ---------- 4. 왼쪽 색 띠 장식 제거 ---------- */
+html body #view .req.req-v2 { border-left-width: 1.5px !important; border-left-color: var(--ui-line) !important; border-color: var(--ui-line) !important; box-shadow: none !important; }
+html body #view .sub-lead { border-left: 0 !important; background: #FFF8E6 !important; border: 1.5px solid var(--ui-line) !important; border-radius: 12px !important; }
+html body #view tr.alert-urgent-row > td:first-child,
+html body #view tr.alert-open-row > td:first-child,
+html body #view tr.alert-acked-row > td:first-child { box-shadow: none !important; border-left: 0 !important; }
+html body #view tr.alert-urgent-row { background: #FFF3F1 !important; }
+
+/* 운행 목록의 파란 버스 아이콘 칸 → 노란 톤 */
+html body #view .trip-record-icon { background: #FFF4D6 !important; color: var(--ui-navy) !important; }
+
+/* ---------- 5. 표·작은 표시 뱃지도 같은 톤 ---------- */
+html body #view table thead th, html body #view table thead tr { background: #FFFAEE !important; color: #6B6250 !important; border-color: var(--ui-line) !important; }
+html body #view table { border-color: var(--ui-line) !important; }
+html body #view table td, html body #view table th { border-color: #F3EADA !important; }
+html body #view :is(.table-wrap, .tablewrap, .bus-table-wrap) { border-color: var(--ui-line) !important; border-radius: 16px !important; box-shadow: none !important; }
+html body #view .badge.muted, html body #view :is(.student-list-count, .bus-list-count) {
+  background: #fff !important; color: #6B6250 !important; border: 1.5px solid var(--ui-line) !important;
+  border-radius: 999px !important; padding: 4px 10px !important; font-weight: 600 !important; box-shadow: none !important;
+}
+/* 버스 표 안의 학생 수 숫자 파란색 → 기본 글자색 */
+html body #view td { color: inherit; }
+html body #view td :is(a, strong, b) { color: inherit; }
+/* 섹션 사이 간격을 같게 */
+html body #view section:not(.dashboard-v2 section) + section:not(.dashboard-v2 section) { margin-top: 28px !important; }
+
+/* ---------- 대시보드 맨 위: 떠 있는 노란 카드 대신 페이지 위쪽을 채우는 띠 ---------- */
+html body .dashboard-v2 .dashboard-hero {
+  margin: -33.75px -37.5px 24px !important;
+  padding: 30px 37.5px !important;
+  border: 0 !important; border-bottom: 1px solid #F1DDA4 !important; border-radius: 0 !important;
+  box-shadow: none !important; background: #FFF1C9 !important;
+}
+@media (max-width: 1180px) {
+  html body .dashboard-v2 .dashboard-hero { margin: -18.75px -15px 16px !important; padding: 22px 15px !important; }
+}
+
+/* ---------- 6. 반복 장식 줄이기 (대시보드와 같은 기준) ---------- */
+/* 운행 목록: 줄마다 붙던 버스 아이콘 칸 제거 */
+html body #view .trip-record-icon { display: none !important; }
+/* 연결 요청: 이름 첫 글자 동그라미는 연한 노랑으로 차분하게 */
+html body #view .req-avatar { background: #FFF4D6 !important; color: var(--ui-navy) !important; box-shadow: none !important; }

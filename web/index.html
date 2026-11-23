@@ -3,12 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>?듯븰??/title>
+  <title>통학이</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
- <link rel="stylesheet" href="style.css?v=dashboard-layout-fix-20261123b">
-  <link rel="stylesheet" href="theme-tonghaki.css?v=dashboard-layout-fix-20261123b">
+  <link rel="stylesheet" href="style.css?v=20261123c">
   <style>
     .login-password-wrap { display: block; position: relative; width: 100%; }
     .login-password-wrap input { width: 100%; box-sizing: border-box; padding-right: 52px; }
@@ -25,49 +24,49 @@
 <section id="login" class="login login-split" hidden>
   <div class="login-visual">
     <div class="login-visual-content">
-      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span><span>?듯븰??/span></div>
+      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span><span>통학이</span></div>
       <div class="login-hero">
-        <h1>?꾩씠?ㅼ쓽 ?덉쟾???깊븯援?<br>?쒕늿??愿由ы븯?몄슂.</h1>
-        <p>?댄뻾 ?꾪솴怨??숈깮 ?뱁븯李?湲곕줉,<br>?덉쟾 寃쎄퀬源뚯? ?섎굹???쒖뒪?쒖뿉??愿由ы빀?덈떎.</p>
+        <h1>아이들의 안전한 등하교,<br>한눈에 관리하세요.</h1>
+        <p>운행 현황과 학생 승하차 기록,<br>안전 경고까지 하나의 시스템에서 관리합니다.</p>
       </div>
-      <div class="login-features"><span>?댄뻾 ?꾪솴 愿由?/span><span>?숈깮 ?뱁븯李?湲곕줉</span><span>?덉쟾 寃쎄퀬 愿由?/span></div>
+      <div class="login-features"><span>운행 현황 관리</span><span>학생 승하차 기록</span><span>안전 경고 관리</span></div>
     </div>
   </div>
   <div class="login-panel">
     <form id="login-form" class="login-box" autocomplete="on">
-      <div class="login-panel-heading"><h2>愿由ъ옄 濡쒓렇??/h2><p>愿由ъ옄 怨꾩젙?쇰줈 濡쒓렇?명븯?몄슂.</p></div>
-      <label>?대찓??input name="email" type="email" autocomplete="username" placeholder="?대찓?쇱쓣 ?낅젰?섏꽭?? required></label>
-      <label>鍮꾨?踰덊샇
+      <div class="login-panel-heading"><h2>관리자 로그인</h2><p>관리자 계정으로 로그인하세요.</p></div>
+      <label>이메일<input name="email" type="email" autocomplete="username" placeholder="이메일을 입력하세요" required></label>
+      <label>비밀번호
         <span class="login-password-wrap">
-          <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="鍮꾨?踰덊샇瑜??낅젰?섏꽭?? required>
-          <button type="button" class="login-password-toggle" hidden aria-label="鍮꾨?踰덊샇 ?쒖떆" aria-pressed="false" aria-controls="login-password">
+          <input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="비밀번호를 입력하세요" required>
+          <button type="button" class="login-password-toggle" hidden aria-label="비밀번호 표시" aria-pressed="false" aria-controls="login-password">
             <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="login-eye-slash" d="M3 3l18 18"/></svg>
           </button>
         </span>
       </label>
       <p id="login-error" class="form-error" role="alert" hidden></p>
-      <button type="submit" class="btn primary">濡쒓렇??/button>
-      <p class="login-footer">?듯븰???쒖뒪??쨌 愿由ъ옄 ?꾩슜</p>
+      <button type="submit" class="btn primary">로그인</button>
+      <p class="login-footer">통학이 시스템 · 관리자 전용</p>
     </form>
   </div>
 </section>
 
 <div id="app" class="app" hidden>
   <aside class="rail">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="rail-brand-name">?듯븰踰꾩뒪 ?덉쟾愿由?/span></div>
-    <nav aria-label="二?硫붾돱">
-      <a href="#/dashboard" data-nav="dashboard">??쒕낫??/a>
-      <a href="#/trips" data-nav="trips">?댄뻾</a>
-      <a href="#/alerts" data-nav="alerts">寃쎄퀬 <span id="nav-alert-count" class="count" hidden>0</span></a>
-      <a href="#/requests" data-nav="requests">?곌껐 ?붿껌 <span id="nav-request-count" class="count" hidden>0</span></a>
-      <a href="#/students" data-nav="students">?숈깮쨌蹂댄샇??/a>
-      <a href="#/buses" data-nav="buses">踰꾩뒪쨌諛곗젙</a>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="rail-brand-name">통학버스 안전관리</span></div>
+    <nav aria-label="주 메뉴">
+      <a href="#/dashboard" data-nav="dashboard">대시보드</a>
+      <a href="#/trips" data-nav="trips">운행</a>
+      <a href="#/alerts" data-nav="alerts">경고 <span id="nav-alert-count" class="count" hidden>0</span></a>
+      <a href="#/requests" data-nav="requests">연결 요청 <span id="nav-request-count" class="count" hidden>0</span></a>
+      <a href="#/students" data-nav="students">학생·보호자</a>
+      <a href="#/buses" data-nav="buses">버스·배정</a>
     </nav>
     <div class="rail-foot">
-      <p class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="live-text">?곌껐 以?/span></p>
+      <p class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="live-text">연결 중</span></p>
       <p class="who"><span id="me-name"></span></p>
-      <button type="button" class="linkbtn" id="open-password-change">鍮꾨?踰덊샇 蹂寃?/button>
-      <button type="button" class="linkbtn" id="logout">濡쒓렇?꾩썐</button>
+      <button type="button" class="linkbtn" id="open-password-change">비밀번호 변경</button>
+      <button type="button" class="linkbtn" id="logout">로그아웃</button>
     </div>
   </aside>
 
@@ -79,26 +78,26 @@
 
 <div id="password-modal" class="modal-backdrop" hidden>
   <section class="password-dialog" role="dialog" aria-modal="true" aria-labelledby="password-dialog-title">
-    <button type="button" class="password-dialog-close" id="close-password-change" aria-label="?リ린">횞</button>
+    <button type="button" class="password-dialog-close" id="close-password-change" aria-label="닫기">×</button>
     <form id="password-change-form">
-      <p class="password-dialog-kicker">怨꾩젙 蹂댁븞</p>
-      <h2 id="password-dialog-title">鍮꾨?踰덊샇 蹂寃?/h2>
-      <p class="password-dialog-description">?꾩옱 鍮꾨?踰덊샇瑜??뺤씤?섍퀬 ??鍮꾨?踰덊샇瑜??ㅼ젙?섏꽭??</p>
-      <label>?꾩옱 鍮꾨?踰덊샇<input name="current_password" type="password" autocomplete="current-password" required></label>
-      <label>??鍮꾨?踰덊샇<input name="new_password" type="password" autocomplete="new-password" required></label>
-      <label>??鍮꾨?踰덊샇 ?뺤씤<input name="confirm_password" type="password" autocomplete="new-password" required></label>
+      <p class="password-dialog-kicker">계정 보안</p>
+      <h2 id="password-dialog-title">비밀번호 변경</h2>
+      <p class="password-dialog-description">현재 비밀번호를 확인하고 새 비밀번호를 설정하세요.</p>
+      <label>현재 비밀번호<input name="current_password" type="password" autocomplete="current-password" required></label>
+      <label>새 비밀번호<input name="new_password" type="password" autocomplete="new-password" required></label>
+      <label>새 비밀번호 확인<input name="confirm_password" type="password" autocomplete="new-password" required></label>
       <p id="password-change-error" class="form-error" role="alert" hidden></p>
       <div class="password-dialog-actions">
-        <button type="button" class="btn" id="cancel-password-change">痍⑥냼</button>
-        <button type="submit" class="btn primary">蹂寃쏀븯湲?/button>
+        <button type="button" class="btn" id="cancel-password-change">취소</button>
+        <button type="submit" class="btn primary">변경하기</button>
       </div>
     </form>
     <div id="password-change-success" hidden>
-      <div class="password-success-icon" aria-hidden="true">??/div>
-      <p class="password-dialog-kicker">蹂寃??꾨즺</p>
-      <h2>鍮꾨?踰덊샇媛 蹂寃쎈릺?덉뒿?덈떎</h2>
-      <p class="password-dialog-description">?꾩옱 ?몄뀡?먯꽌 濡쒓렇?꾩썐?섏뿀?듬땲?? ??鍮꾨?踰덊샇濡??ㅼ떆 濡쒓렇?명빐 二쇱꽭??</p>
-      <button type="button" class="btn primary password-login-button" id="password-change-login">濡쒓렇???붾㈃?쇰줈</button>
+      <div class="password-success-icon" aria-hidden="true">✓</div>
+      <p class="password-dialog-kicker">변경 완료</p>
+      <h2>비밀번호가 변경되었습니다</h2>
+      <p class="password-dialog-description">현재 세션에서 로그아웃되었습니다. 새 비밀번호로 다시 로그인해 주세요.</p>
+      <button type="button" class="btn primary password-login-button" id="password-change-login">로그인 화면으로</button>
     </div>
   </section>
 </div>
@@ -113,7 +112,7 @@
       if (toggle.hidden) {
         input.type = 'password';
         toggle.setAttribute('aria-pressed', 'false');
-        toggle.setAttribute('aria-label', '鍮꾨?踰덊샇 ?쒖떆');
+        toggle.setAttribute('aria-label', '비밀번호 표시');
       }
     };
     input.addEventListener('input', syncToggle);
@@ -122,14 +121,10 @@
       const show = input.type === 'password';
       input.type = show ? 'text' : 'password';
       toggle.setAttribute('aria-pressed', String(show));
-      toggle.setAttribute('aria-label', show ? '鍮꾨?踰덊샇 ?④린湲? : '鍮꾨?踰덊샇 ?쒖떆');
+      toggle.setAttribute('aria-label', show ? '비밀번호 숨기기' : '비밀번호 표시');
     });
   })();
 </script>
-<<<<<<< HEAD
-<script src="app.js?v=20261123"></script>
-=======
-<script src="app.js?v=dashboard-layout-fix-20261123b"></script>
->>>>>>> f8ebf0d (style: 愿由ъ옄 ??쒕낫??UI 諛?諛섏쓳???섏젙)
+<script src="app.js?v=20261123c"></script>
 </body>
 </html>

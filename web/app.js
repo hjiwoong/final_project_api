@@ -316,7 +316,7 @@
       api('/trips?' + new URLSearchParams({ limit: '100', ...(from ? { from } : {}), simulation_mode: String(dashSimulation) })),
       api('/alerts?' + new URLSearchParams({level: 'URGENT', limit: '5', ...(from ? { from } : {}), simulation_mode: String(dashSimulation)})),
       api('/web/buses'),
-      api('/web/child-requests?status=PENDING&limit=4').catch(() => null),
+      api('/web/child-requests?status=PENDING&limit=3').catch(() => null),
       api('/trips?' + new URLSearchParams({ status: 'IN_PROGRESS', simulation_mode: String(dashSimulation), limit: '100' }))
     ]);
     const activeByBus = new Map();
@@ -331,8 +331,10 @@
     const s = summary;
     const unresolved = (s.alert_by_status?.OPEN || 0) + (s.alert_by_status?.ACKED || 0);
     const tripItems = trips.items || [];
-    const recentTrips = tripItems.slice(0, 4);
-    const recentAlerts = alerts.items || [];
+    // 대시보드 목록은 최근 3건씩만 (전체는 각 패널의 '전체 보기')
+    const DASH_LIST = 3;
+    const recentTrips = tripItems.slice(0, DASH_LIST);
+    const recentAlerts = (alerts.items || []).slice(0, DASH_LIST);
     const latestTripByBus = new Map();
     for (const t of tripItems) if (!latestTripByBus.has(String(t.bus_id))) latestTripByBus.set(String(t.bus_id), t);
     const nd = s.notify_delay || {};
@@ -404,7 +406,7 @@
       // 열린 박스 위치에 맞춰 요약 창 윗선의 '이음 부분'을 계산
       const alignTab = () => {
         const card = cards.find((c) => c.dataset.kpi === dashOpenKpi);
-        if (!card) return;
+        if (!card) { cards.forEach((c) => c.classList.remove('attached')); panel.classList.remove('attached'); body.classList.remove('attached'); return; }
         const pr = body.getBoundingClientRect();
         const cr = card.getBoundingClientRect();
         const bw = 1.5;
@@ -414,6 +416,12 @@
         body.classList.toggle('tab-last', pr.right - cr.right < 2);
         card.classList.toggle('tab-first', cr.left - pr.left < 2);
         card.classList.toggle('tab-last', pr.right - cr.right < 2);
+        // 네 박스가 한 줄일 때(넓은 화면)만 요약 창과 붙임. 2열 배치에서는 떨어진 창으로 열림
+        const tops = cards.map((c) => c.getBoundingClientRect().top);
+        const attached = Math.max(...tops) - Math.min(...tops) < 2;
+        cards.forEach((c) => c.classList.toggle('attached', attached && c === card));
+        panel.classList.toggle('attached', attached);
+        body.classList.toggle('attached', attached);
       };
       if (dashTabResize) window.removeEventListener('resize', dashTabResize);
       dashTabResize = alignTab;
@@ -462,7 +470,7 @@
         ` : ''}
         <div class="dashboard-main-grid">
           <section class="dashboard-panel dashboard-chart-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><div><h2>운행 및 경고 추이</h2></div></div><div class="seg" role="group" aria-label="조회 기간">${periods.map(([key,label]) => `<button type="button" data-act="period" data-value="${key}" aria-pressed="${dashPeriod === key}">${label}</button>`).join('')}</div></div><div class="dashboard-chart-content">${chartSvg(s.daily || [])}</div></section>
-          <section class="dashboard-panel dashboard-fleet-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><div><h2>버스별 현재 상태</h2></div></div><a href="#/buses">전체 보기</a></div><div class="dashboard-fleet-table-head"><span>버스(차량번호)</span><span>배정 학생</span><span>운행 상태</span></div><div class="dashboard-fleet-list">${buses.map(b => {
+          <section class="dashboard-panel dashboard-fleet-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><div><h2>버스별 현재 상태</h2></div></div><a href="#/buses">전체 보기</a></div><div class="dashboard-fleet-table-head"><span>버스(차량번호)</span><span>배정 학생</span><span>운행 상태</span></div><div class="dashboard-fleet-list">${[...buses].sort((x, y) => Number(activeByBus.has(String(y.id))) - Number(activeByBus.has(String(x.id)))).slice(0, DASH_LIST).map(b => {
             const t = activeByBus.get(String(b.id));
             const status = t ? '운행 중' : '대기 중';
             const cls = t ? 'running' : 'idle';
@@ -470,46 +478,10 @@
           }).join('') || '<p class="empty">등록된 차량이 없습니다.</p>'}</div></section>
         </div>
         <div class="dashboard-bottom-grid">
-          <section class="dashboard-panel dashboard-results-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><div><h2>운행 결과 현황</h2></div></div></div>
-          <div class="overview-distribution">
-            <div class="overview-distribution-body">
-              <div class="overview-donut" style="--ring:${ring}"
-                role="img"
-                aria-label="정상 ${normalCount}건, 확인 필요 ${checkCount}건, 미하차 의심 ${riskCount}건">
-                <div>
-                  <strong>${totalTrips}</strong>
-                  <small>총 운행</small>
-                </div>
-              </div>
           
-              <div class="overview-donut-legend">
-                <span><i class="normal"></i>정상 <strong>${normalCount}건</strong></span>
-                <span><i class="check"></i>확인 필요 <strong>${checkCount}건</strong></span>
-                <span><i class="missed"></i>미하차 의심 <strong>${riskCount}건</strong></span>
-              </div>
-            </div>
-          
-            <div class="dashboard-result-stats">
-              <div class="dashboard-result-stat normal">
-                <small>정상</small>
-                <strong>${normalPct}%</strong>
-              </div>
-              <div class="dashboard-result-stat check">
-                <small>확인 필요</small>
-                <strong>${checkPct}%</strong>
-              </div>
-              <div class="dashboard-result-stat missed">
-                <small>미하차 의심</small>
-                <strong>${missedPct}%</strong>
-              </div>
-            </div>
-          </div>
-          </section>
           <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 위험 경고</h2></div><a href="#/alerts">전체 보기</a></div><div class="dashboard-feed">${recentAlerts.map(a => `<a href="#/alerts/${a.id}" class="dashboard-feed-row"><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">✓</span><strong>최근 경고 없음</strong><small>선택한 기간에 발생한 경고가 없습니다.</small></div>'}</div></section>
           <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 운행 기록</h2></div><a href="#/trips">전체 보기</a></div><div class="dashboard-feed">${recentTrips.map(t => `<a href="#/trips/${t.id}" class="dashboard-feed-row"><span class="dashboard-feed-info"><strong>${esc(t.bus_name || '차량 정보 없음')}</strong><small>${t.started_at ? esc(new Date(t.started_at).toLocaleString('ko-KR', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false})) : '시작 시간 미기록'} · 승차 ${num(t.boarding_count)}명 / 하차 ${num(t.alighted_count)}명</small></span><span class="dashboard-feed-tags">${tripStatus(t)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">▤</span><strong>운행 기록 없음</strong><small>운행이 시작되면 기록이 표시됩니다.</small></div>'}</div></section>
-        </div>
-        <div class="dashboard-secondary-section">
-          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>보호자 연결 요청</h2></div><a href="#/requests">전체 보기</a></div><div class="dashboard-feed">${requests ? (requests.items || []).map(r => `<a href="#/requests" class="dashboard-feed-row"><span class="dashboard-feed-info"><strong>${esc(r.user?.name || '신청자')}</strong><small>${esc(r.child_name || '학생 정보 없음')}${r.class_name ? ` (${esc(r.class_name)})` : ''} · ${fmtTime(r.created_at)}</small></span><span class="badge warn">승인 대기</span></a>`).join('') || '<div class="dashboard-empty-state"><span class="dashboard-empty-icon">✓</span><p>대기 중인 연결 요청이 없습니다.</p></div>'
+          <section class="dashboard-panel dashboard-requests-panel"><div class="dashboard-panel-head"><div><h2>보호자 연결 요청</h2></div><a href="#/requests">전체 보기</a></div><div class="dashboard-feed">${requests ? (requests.items || []).slice(0, DASH_LIST).map(r => `<a href="#/requests" class="dashboard-feed-row"><span class="dashboard-feed-info"><strong>${esc(r.user?.name || '신청자')}</strong><small>${esc(r.child_name || '학생 정보 없음')}${r.class_name ? ` (${esc(r.class_name)})` : ''} · ${fmtTime(r.created_at)}</small></span><span class="badge warn">승인 대기</span></a>`).join('') || '<div class="dashboard-empty-state"><span class="dashboard-empty-icon">✓</span><p>대기 중인 연결 요청이 없습니다.</p></div>'
       : '<div class="dashboard-empty-state"><p>연결 요청 정보를 불러올 수 없습니다.</p></div>'}</div></section>
         </div>
         <footer class="dashboard-footer">
@@ -654,7 +626,6 @@
     
         <a class="trip-record-detail" href="#/trips/${t.id}">
           상세 보기
-          <span aria-hidden="true">→</span>
         </a>
       </article>
     `).join('');
@@ -1139,7 +1110,7 @@
         <td>${fmtTime(a.created_at)}</td>
         <td>
           <a class="trip-detail-link" href="#/alerts/${a.id}">
-            상세 보기 →
+            상세 보기
           </a>
         </td>
       </tr>
@@ -1464,7 +1435,7 @@
         <td>${fmtTime(a.created_at)}</td>
         <td>
           <a class="alert-detail-btn" href="#/alerts/${a.id}">
-            상세 보기 →
+            상세 보기
           </a>
         </td>
       </tr>
