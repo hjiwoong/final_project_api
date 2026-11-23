@@ -54,7 +54,7 @@ def raise_alert(
         db.flush()
         if escalated:
             # 긴급으로 올라가면 아직 알림을 못 받은 보호자에게 알림 추가 (관리자 중복 없음)
-            _notify(db, a, trip, level)
+            _notify(db, a, trip, level, remaining, event.low_conf_count)
         return a
 
     a = Alert(
@@ -66,7 +66,7 @@ def raise_alert(
     )
     db.add(a)
     db.flush()
-    _notify(db, a, trip, level)
+    _notify(db, a, trip, level, remaining, event.low_conf_count)
     return a
 
 
@@ -79,10 +79,19 @@ def resolve_open_alerts(db: Session, trip_id: int, note: str) -> list[Alert]:
     return alerts
 
 
-def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
+def _notify(
+    db: Session, alert: Alert, trip: Trip, level: AlertLevel,
+    remaining: int, low_conf_count: int,
+) -> None:
     bus_name = trip.bus.name if trip.bus else f"{trip.bus_id}번 버스"
-    title = ("🚨 " if level == AlertLevel.URGENT else "⚠️ ") + (alert.message or "경고")
-    body = f"{bus_name} · {alert.llm_summary}"
+    if level == AlertLevel.URGENT:
+        title = f"미하차 의심 {max(remaining - low_conf_count, 0)}명"
+        event_type = "MISSED"
+    else:
+        title = "사진 확인 필요"
+        event_type = "NEEDS_CHECK"
+    details = " · ".join(filter(None, (alert.message, alert.llm_summary)))
+    body = f"{bus_name} · {details}"
 
     user_ids = {
         u.id
@@ -118,6 +127,9 @@ def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
             Notification(
                 alert_id=alert.id,
                 user_id=uid,
+                trip_id=trip.id,
+                category=alert.level.value,
+                event_type=event_type,
                 title=title,
                 body=body,
             )
@@ -332,11 +344,11 @@ def create_trip_notifications(
     bus_name = trip.bus.name if trip.bus else f"{trip.bus_id}번 버스"
 
     if event_type == "STARTED":
-        title = "운행 시작 알림"
-        body = f"{bus_name} 운행이 시작되었습니다."
+        title = "운행 시작"
+        body = f"{bus_name} · 운행이 시작되었습니다."
     else:
-        title = "운행 종료 알림"
-        body = f"{bus_name} 운행이 종료되었습니다."
+        title = "운행 종료"
+        body = f"{bus_name} · 운행이 종료되었습니다."
 
     parent_ids = {
         user_id

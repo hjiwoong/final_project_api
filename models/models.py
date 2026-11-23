@@ -380,6 +380,7 @@ class Notification(Base):
     read_at = Column(DateTime, nullable=True)
 
     alert = relationship("Alert", back_populates="notifications")
+    trip = relationship("Trip")
     user = relationship("User", back_populates="notifications")
 
 class PushToken(Base):
