@@ -84,11 +84,10 @@ def _notify(
     remaining: int, low_conf_count: int,
 ) -> None:
     bus_name = trip.bus.name if trip.bus else f"{trip.bus_id}번 버스"
+    title = alert.message or "경고"
     if level == AlertLevel.URGENT:
-        title = f"미하차 의심 {max(remaining - low_conf_count, 0)}명"
         event_type = "MISSED"
     else:
-        title = "사진 확인 필요"
         event_type = "NEEDS_CHECK"
     details = " · ".join(filter(None, (alert.message, alert.llm_summary)))
     body = f"{bus_name} · {details}"
