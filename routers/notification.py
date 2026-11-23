@@ -18,6 +18,7 @@ class NotificationCategory(str, Enum):
     URGENT = "URGENT"
     CHECK = "CHECK"
     TRIP = "TRIP"
+    ATTENDANCE = "ATTENDANCE"
 
 
 def kst_isoformat(value: datetime | None) -> str | None:

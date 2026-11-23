@@ -8,8 +8,10 @@ from services.trip_delay_service import check_delayed_trips
 from services.image_retention import run_purge_job
 from datetime import datetime
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -21,6 +23,7 @@ from database.orm import init_db
 from services.account_deletions import delete_expired_accounts
 from services.detector import MODE as DETECTOR_MODE
 from routers import (
+    attendance, attendance_file,
     alert, boarding_event, bus, bus_student, chat, child_request, guardian, location,
     notification, parent_bus, rag, social, stats, student, student_admin, trip, user,trip_schedule
 )
@@ -93,6 +96,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI 통학버스 미하차 교차검증·안전관리", lifespan=lifespan)
 
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    errors = [
+        {
+            "loc": error["loc"],
+            "msg": error["msg"],
+            "type": error["type"],
+        }
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 # 관리자 웹(브라우저)에서 호출할 수 있도록 CORS 허용 (개발용)
 app.add_middleware(
     CORSMiddleware,
@@ -104,6 +123,8 @@ app.add_middleware(
 app.include_router(user.router)
 app.include_router(bus.router, dependencies=[Depends(require_admin)])
 app.include_router(student.router)
+app.include_router(attendance.router)
+app.include_router(attendance_file.router)
 app.include_router(bus_student.router, dependencies=[Depends(require_admin)])
 app.include_router(guardian.router, dependencies=[Depends(require_admin)])
 app.include_router(location.router)

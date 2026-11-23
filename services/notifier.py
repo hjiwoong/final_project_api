@@ -15,13 +15,64 @@ from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
+from core.time import now_kst_naive
 from database.db_connection import SessionLocal
 from models.models import (
     Alert, AlertLevel, AlertStatus, Attendance, BoardingEvent, BusStudent,
-    Guardian, Notification, PushToken, Trip, User, UserRole,
+    Guardian, Notification, PushToken, Student, Trip, User, UserRole,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def create_attendance_notifications(
+    db: Session,
+    student: Student,
+    start_date: date,
+    event_type: str,
+    end_date: date | None = None,
+) -> list[int]:
+    """Create privacy-safe attendance notifications for the relevant recipients."""
+    titles = {
+        "ABSENCE_REQUESTED": "결석 신청",
+        "ABSENCE_CONFIRMED": "결석 확인됨",
+        "ABSENCE_REJECTED": "결석 반려",
+    }
+    if event_type not in titles:
+        raise ValueError("지원하지 않는 결석 알림 종류입니다.")
+
+    if event_type == "ABSENCE_REQUESTED":
+        user_ids = {
+            user_id
+            for (user_id,) in db.query(User.id).filter(User.role == UserRole.ADMIN)
+        }
+    else:
+        user_ids = {
+            user_id
+            for (user_id,) in db.query(Guardian.user_id)
+            .filter(Guardian.student_id == student.id)
+        }
+
+    masked_name = (student.name[:1] + "○" * max(len(student.name) - 1, 1))
+    date_text = f"{start_date.month}월 {start_date.day}일"
+    if end_date is not None and end_date != start_date:
+        date_text += f"~{end_date.month}월 {end_date.day}일"
+    body = f"{masked_name} · {date_text}"
+
+    notifications = [
+        Notification(
+            user_id=user_id,
+            category="ATTENDANCE",
+            event_type=event_type,
+            title=titles[event_type],
+            body=body,
+            sent_at=now_kst_naive(),
+        )
+        for user_id in user_ids
+    ]
+    db.add_all(notifications)
+    db.flush()
+    return [notification.id for notification in notifications]
 
 
 def build_summary(boarding: int, remaining: int, level: AlertLevel) -> str:

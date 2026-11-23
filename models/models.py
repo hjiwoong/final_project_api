@@ -73,6 +73,19 @@ class ChildRequestStatus(str, enum.Enum):
     REJECTED = "REJECTED"    # 거절됨
 
 
+class AttendanceReasonType(str, enum.Enum):
+    SICK = "SICK"
+    FAMILY = "FAMILY"
+    FIELD_TRIP = "FIELD_TRIP"
+    OTHER = "OTHER"
+
+
+class AttendanceStatus(str, enum.Enum):
+    REQUESTED = "REQUESTED"
+    CONFIRMED = "CONFIRMED"
+    REJECTED = "REJECTED"
+
+
 # ---------- 계정 ----------
 class User(Base):
     __tablename__ = "users"
@@ -189,8 +202,56 @@ class Attendance(Base):
     student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False)
     is_absent = Column(Boolean, nullable=False, default=False)
+    reason_type = Column(Enum(AttendanceReasonType), nullable=True)
+    reason_memo = Column(Text, nullable=True)
+    status = Column(Enum(AttendanceStatus), nullable=True, index=True)
+    confirmed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    reject_reason = Column(String(200), nullable=True)
 
     student = relationship("Student", back_populates="attendances")
+    confirmer = relationship("User", foreign_keys=[confirmed_by])
+    files = relationship(
+        "AttendanceFile",
+        back_populates="attendance",
+        cascade="all, delete-orphan",
+    )
+
+
+class AttendanceFile(Base):
+    __tablename__ = "attendance_files"
+    __table_args__ = (
+        UniqueConstraint("stored_name", name="uq_attendance_files_stored_name"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    attendance_id = Column(
+        Integer,
+        ForeignKey(
+            "attendances.id",
+            ondelete="CASCADE",
+            name="fk_attendance_files_attendance_id_attendances",
+        ),
+        nullable=False,
+        index=True,
+    )
+    stored_name = Column(String(64), nullable=False)
+    original_name = Column(String(255), nullable=False)
+    content_type = Column(String(50), nullable=False)
+    size = Column(Integer, nullable=False)
+    uploaded_by = Column(
+        Integer,
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+            name="fk_attendance_files_uploaded_by_users",
+        ),
+        nullable=True,
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    attendance = relationship("Attendance", back_populates="files")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
 
 
 # ---------- 버스 ----------

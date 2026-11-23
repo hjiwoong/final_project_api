@@ -1,17 +1,21 @@
 from datetime import date, datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.security import require_admin, require_parent_terms_agreed
+from core.time import KST, now_kst_naive
 from database.db_connection import get_db
 from routers.location import student_location
 from models.models import (
-    Attendance, Bus, BusStudent, Guardian, Student, Trip, TripStatus, User,
-    TripStudentAttendance,
+    Attendance, AttendanceReasonType, AttendanceStatus, Bus, BusStudent,
+    Guardian, Student, Trip, TripStatus, User, TripStudentAttendance,
 )
+from services import notifier
+from services.attendance_deadline import get_deadline
+from services.attendance_file_storage import attendance_file_to_dict
 
 router = APIRouter(tags=["학생"])
 
@@ -25,6 +29,28 @@ class StudentCreate(BaseModel):
 class AttendanceSet(BaseModel):
     date: date
     is_absent: bool
+    reason_type: AttendanceReasonType | None = None
+    reason_memo: str | None = None
+
+
+class AttendanceRangeSet(BaseModel):
+    from_date: date = Field(alias="from")
+    to_date: date = Field(alias="to")
+    is_absent: bool
+    reason_type: AttendanceReasonType | None = None
+    reason_memo: str | None = None
+
+
+def _attendance_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=KST, microsecond=0).isoformat()
+
+
+def _attendance_status(attendance: Attendance | None) -> str | None:
+    if attendance is None or not attendance.is_absent or attendance.status is None:
+        return None
+    return attendance.status.value
 
 
 class TripAttendanceConfirmation(BaseModel):
@@ -61,7 +87,7 @@ def my_children(
     db: Session = Depends(get_db),
 ):
     """내 자녀의 날짜별 결석 설정과 배정 버스의 실제 운행 상태"""
-    target_date = attendance_date or date.today()
+    target_date = attendance_date or now_kst_naive().date()
     rows = (
         db.query(Student)
         .join(Guardian, Guardian.student_id == Student.id)
@@ -113,7 +139,7 @@ def my_children(
         )
         .all()
     )
-    absent_by_student = {row.student_id: row.is_absent for row in attendances}
+    attendance_by_student = {row.student_id: row for row in attendances}
     trip_student_attendances = {}
     trip_ids = {trip.id for trip in latest_trip_by_bus.values()}
     if trip_ids:
@@ -152,10 +178,22 @@ def my_children(
             if selected_trip
             else None
         )
+        attendance = attendance_by_student.get(student.id)
+        deadline_at, editable = get_deadline(db, student.id, target_date)
         children.append({
             **student_to_dict(student),
             "location": student_location(student),
-            "is_absent": absent_by_student.get(student.id, False),
+            "is_absent": attendance.is_absent if attendance else False,
+            "attendance": {
+                "status": _attendance_status(attendance),
+                "deadline_at": _attendance_iso(deadline_at),
+                "editable": editable,
+                "files": (
+                    [attendance_file_to_dict(file) for file in attendance.files]
+                    if attendance
+                    else []
+                ),
+            },
             "bus_id": bus["id"] if bus else None,
             "bus_name": bus["name"] if bus else None,
             "bus_status": trip_status,
@@ -321,6 +359,7 @@ def unlink_my_child(
 def set_attendance(
     student_id: int,
     body: AttendanceSet,
+    background_tasks: BackgroundTasks,
     me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
@@ -333,17 +372,146 @@ def set_attendance(
     if not is_mine:
         raise HTTPException(403, "내 자녀가 아닙니다")
 
+    _, editable = get_deadline(db, student_id, body.date)
+    if not editable:
+        raise HTTPException(409, "결석 신청 마감 시간이 지났습니다")
+
     a = (
         db.query(Attendance)
         .filter(Attendance.student_id == student_id, Attendance.date == body.date)
         .first()
     )
+    should_notify = bool(
+        body.is_absent
+        and (
+            a is None
+            or not a.is_absent
+            or a.status == AttendanceStatus.REJECTED
+        )
+    )
     if a:
         a.is_absent = body.is_absent
+        if body.reason_type is not None:
+            a.reason_type = body.reason_type
+        if body.reason_memo is not None:
+            a.reason_memo = body.reason_memo
+        if body.is_absent and (not a.status or a.status == AttendanceStatus.REJECTED):
+            a.status = AttendanceStatus.REQUESTED
+            a.confirmed_by = None
+            a.confirmed_at = None
+            a.reject_reason = None
+        elif not body.is_absent:
+            a.status = None
+            a.confirmed_by = None
+            a.confirmed_at = None
+            a.reject_reason = None
     else:
-        db.add(Attendance(student_id=student_id, date=body.date, is_absent=body.is_absent))
+        a = Attendance(
+            student_id=student_id,
+            date=body.date,
+            is_absent=body.is_absent,
+            reason_type=body.reason_type,
+            reason_memo=body.reason_memo,
+            status=AttendanceStatus.REQUESTED if body.is_absent else None,
+        )
+        db.add(a)
     db.commit()
+    if should_notify:
+        notification_ids = notifier.create_attendance_notifications(
+            db, a.student, body.date, "ABSENCE_REQUESTED"
+        )
+        db.commit()
+        if notification_ids:
+            background_tasks.add_task(notifier.send_trip_pushes, notification_ids)
     return {"student_id": student_id, "date": body.date, "is_absent": body.is_absent}
+
+
+@router.put("/me/children/{student_id}/attendances/range")
+def set_attendance_range(
+    student_id: int,
+    body: AttendanceRangeSet,
+    background_tasks: BackgroundTasks,
+    me: User = Depends(require_parent_terms_agreed),
+    db: Session = Depends(get_db),
+):
+    is_mine = db.query(Guardian.id).filter(
+        Guardian.user_id == me.id,
+        Guardian.student_id == student_id,
+    ).first()
+    if not is_mine:
+        raise HTTPException(403, "내 자녀가 아닙니다")
+    if body.from_date > body.to_date:
+        raise HTTPException(422, "시작 날짜는 종료 날짜보다 늦을 수 없습니다")
+
+    dates = []
+    current = body.from_date
+    while current <= body.to_date:
+        _, editable = get_deadline(db, student_id, current)
+        if not editable:
+            raise HTTPException(409, "결석 신청 마감 시간이 지났습니다")
+        dates.append(current)
+        current += timedelta(days=1)
+
+    rows = {
+        row.date: row
+        for row in db.query(Attendance).filter(
+            Attendance.student_id == student_id,
+            Attendance.date.in_(dates),
+        )
+    }
+    notification_dates = []
+    for attendance_date in dates:
+        row = rows.get(attendance_date)
+        if body.is_absent:
+            if row is None:
+                row = Attendance(
+                    student_id=student_id,
+                    date=attendance_date,
+                    is_absent=True,
+                    reason_type=body.reason_type,
+                    reason_memo=body.reason_memo,
+                    status=AttendanceStatus.REQUESTED,
+                )
+                db.add(row)
+                notification_dates.append(attendance_date)
+                continue
+            if not row.is_absent or row.status == AttendanceStatus.REJECTED:
+                notification_dates.append(attendance_date)
+                row.status = AttendanceStatus.REQUESTED
+                row.confirmed_by = None
+                row.confirmed_at = None
+                row.reject_reason = None
+            row.is_absent = True
+            if body.reason_type is not None:
+                row.reason_type = body.reason_type
+            if body.reason_memo is not None:
+                row.reason_memo = body.reason_memo
+        elif row is not None:
+            row.is_absent = False
+            row.status = None
+            row.confirmed_by = None
+            row.confirmed_at = None
+            row.reject_reason = None
+
+    db.commit()
+    if notification_dates:
+        notification_ids = notifier.create_attendance_notifications(
+            db,
+            db.get(Student, student_id),
+            min(notification_dates),
+            "ABSENCE_REQUESTED",
+            max(notification_dates),
+        )
+        db.commit()
+        if notification_ids:
+            background_tasks.add_task(notifier.send_trip_pushes, notification_ids)
+    return {
+        "student_id": student_id,
+        "from": body.from_date,
+        "to": body.to_date,
+        "is_absent": body.is_absent,
+    }
+
 
 @router.get("/me/children/{student_id}/attendance")
 def get_attendance(
@@ -375,9 +543,69 @@ def get_attendance(
         )
         .first()
     )
+    deadline_at, editable = get_deadline(db, student_id, date)
 
     return {
         "student_id": student_id,
         "date": date,
         "is_absent": attendance.is_absent if attendance else False,
+        "status": _attendance_status(attendance),
+        "confirmed_at": _attendance_iso(attendance.confirmed_at if attendance else None),
+        "reject_reason": attendance.reject_reason if attendance else None,
+        "files": (
+            [attendance_file_to_dict(file) for file in attendance.files]
+            if attendance
+            else []
+        ),
+        "deadline_at": _attendance_iso(deadline_at),
+        "editable": editable,
     }
+
+
+@router.get("/me/children/{student_id}/attendances")
+def get_attendances(
+    student_id: int,
+    from_date: date = Query(alias="from"),
+    to_date: date = Query(alias="to"),
+    me: User = Depends(require_parent_terms_agreed),
+    db: Session = Depends(get_db),
+):
+    is_mine = db.query(Guardian.id).filter(
+        Guardian.user_id == me.id,
+        Guardian.student_id == student_id,
+    ).first()
+    if not is_mine:
+        raise HTTPException(403, "내 자녀가 아닙니다")
+    if from_date > to_date:
+        raise HTTPException(422, "시작 날짜는 종료 날짜보다 늦을 수 없습니다")
+
+    rows = {
+        row.date: row
+        for row in db.query(Attendance).filter(
+            Attendance.student_id == student_id,
+            Attendance.date >= from_date,
+            Attendance.date <= to_date,
+        )
+    }
+    result = []
+    current = from_date
+    while current <= to_date:
+        attendance = rows.get(current)
+        deadline_at, editable = get_deadline(db, student_id, current)
+        result.append({
+            "student_id": student_id,
+            "date": current.isoformat(),
+            "is_absent": attendance.is_absent if attendance else False,
+            "status": _attendance_status(attendance),
+            "confirmed_at": _attendance_iso(attendance.confirmed_at if attendance else None),
+            "reject_reason": attendance.reject_reason if attendance else None,
+            "files": (
+                [attendance_file_to_dict(file) for file in attendance.files]
+                if attendance
+                else []
+            ),
+            "deadline_at": _attendance_iso(deadline_at),
+            "editable": editable,
+        })
+        current += timedelta(days=1)
+    return result
