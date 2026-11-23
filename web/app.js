@@ -1,4 +1,4 @@
-/* 통학버스 안전관리 - 관리자 웹 (빌드 없는 단일 파일)
+/* 통학이 - 관리자 웹 (빌드 없는 단일 파일)
    FastAPI 가 /admin 으로 서빙하므로 API 와 같은 출처에서 동작한다. */
 (() => {
   'use strict';
@@ -109,6 +109,8 @@
   // ---------- 페이지 상태 ----------
   let dashPeriod = 'today';
   let dashSimulation = false;
+  let dashOpenKpi = '';
+  let dashTabResize = null;
   const tripsState = {
     result: '',
     status: '',
@@ -345,47 +347,98 @@
     const checkPct = totalTrips ? Math.round(checkCount / totalTrips * 100) : 0;
     const missedPct = totalTrips ? Math.round(riskCount / totalTrips * 100) : 0;
     const ring = totalTrips ? `conic-gradient(#24815b 0 ${normalPct}%, #e8ac19 ${normalPct}% ${normalPct + checkPct}%, #dc404c ${normalPct + checkPct}% ${normalPct + checkPct + missedPct}%, #dce4ee ${normalPct + checkPct + missedPct}% 100%)` : '#e7edf4';
-    const kpi = (kind, label, value, unit, detail, href, icon) => `
-      <a
-        class="overview-kpi ${kind}"
-        href="${href}"
-        ${href === '#/trips'
-          ? `data-dash-trip-link="true"
-             ${label === '미하차 의심' ? 'data-trip-result="MISSED"' : ''}
-             ${label === '운행 중인 버스' ? 'data-trip-status="IN_PROGRESS"' : ''}`
-          : ''}
-        ${label === '미해결 경고' ? 'data-dash-unresolved="true"' : ''}
-      >
+    const kpi = (key, kind, label, value, unit, detail, icon, extra = '') => `
+      <button type="button" class="overview-kpi ${kind}" data-kpi="${key}" aria-expanded="false" aria-controls="kpi-detail">
         <div class="overview-kpi-top">
           <span class="overview-kpi-icon" aria-hidden="true">${icon}</span>
-          <span class="overview-kpi-arrow" aria-hidden="true">↗</span>
+          <span class="overview-kpi-toggle" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         </div>
         <span class="overview-kpi-label">${label}</span>
         <strong>${value}<small>${unit}</small></strong>
         <span class="overview-kpi-note">${detail}</span>
-      </a>
+        ${extra}
+      </button>
     `;
     const tripStatus = (t) => `${badge(TRIP_STATUS, t.status)} ${badge(RESULT, t.result)}`;
-    const dateLabel = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+    const dateLabel = new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' });
     const scope = `${dashSimulation ? '시연 모드' : '실제 운행'} · ${periodText}`;
+    const heroLine = [
+      activeBusCount ? `지금 ${activeBusCount}대가 운행 중이에요.` : '지금 운행 중인 버스는 없어요.',
+      unresolved ? `아직 해결되지 않은 경고가 ${unresolved}건 있어요.` : '해결할 경고는 없어요.'
+    ].join(' ');
+    const hhmm = (v) => v ? new Date(v).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }) : '-';
+    const detailRow = (href, title, sub, tags = '', attrs = '') => `<a class="kpi-detail-row" href="${href}" ${attrs}><span class="kpi-detail-main"><strong>${title}</strong><small>${sub}</small></span><span class="kpi-detail-tags">${tags}</span><span class="kpi-detail-chev" aria-hidden="true">›</span></a>`;
+    const detailEmpty = (text) => `<p class="kpi-detail-empty">${text}</p>`;
+    const detailFoot = (href, text, attrs = '') => `<div class="kpi-detail-foot"><a href="${href}" ${attrs}>${text}</a></div>`;
+    const missedTrips = tripItems.filter((t) => t.result === 'MISSED');
+    const rateRow = (cls, label, count, pct) => `<div class="kpi-rate-row"><span class="kpi-rate-label"><i class="${cls}"></i>${label}</span><span class="kpi-rate-bar"><span class="${cls}" style="width:${pct}%"></span></span><strong>${count}건</strong><small>${pct}%</small></div>`;
+    const details = {
+      buses: () => `<h3>운행 중인 버스 <span>${activeBusCount}대</span></h3>
+        <div class="kpi-detail-list">${[...activeByBus.values()].map((t) => detailRow(`#/trips/${t.id}`, esc(t.bus_name || '버스'), `${hhmm(t.started_at)} 출발 · 승차 ${num(t.boarding_count)}명`, badge(TRIP_STATUS, t.status))).join('') || detailEmpty('지금 운행 중인 버스가 없습니다.')}</div>
+        ${detailFoot('#/trips', '운행 관리에서 보기', 'data-dash-trip-link="true" data-trip-status="IN_PROGRESS"')}`,
+      alerts: () => `<h3>미해결 경고 <span>${unresolved}건</span></h3>
+        <div class="kpi-detail-list">${unresolvedAlerts.map((a) => detailRow(`#/alerts/${a.id}`, esc(a.message || '경고 발생'), `${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}`, badge(LEVEL, a.level) + badge(ALERT_STATUS, a.status))).join('') || detailEmpty('처리할 경고가 없습니다.')}</div>
+        ${detailFoot('#/alerts', '경고 관리에서 전체 보기', 'data-dash-unresolved="true"')}`,
+      missed: () => `<h3>미하차 의심 운행 <span>${riskCount}건 · ${esc(periodText)}</span></h3>
+        <div class="kpi-detail-list">${missedTrips.map((t) => detailRow(`#/trips/${t.id}`, esc(t.bus_name || '버스'), `${hhmm(t.started_at)} 출발 · 승차 ${num(t.boarding_count)}명 / 하차 ${num(t.alighted_count)}명`, badge(RESULT, t.result))).join('') || detailEmpty('선택한 기간에 미하차 의심 운행이 없습니다.')}</div>
+        ${detailFoot('#/trips', '운행 관리에서 보기', 'data-dash-trip-link="true" data-trip-result="MISSED"')}`,
+      rate: () => `<h3>운행 결과 <span>총 ${totalTrips}건 · ${esc(periodText)}</span></h3>
+        <div class="kpi-rate">${rateRow('normal', '정상', normalCount, normalPct)}${rateRow('check', '확인 필요', checkCount, checkPct)}${rateRow('missed', '미하차 의심', riskCount, missedPct)}</div>
+        ${detailFoot('#/trips', '운행 관리에서 보기', 'data-dash-trip-link="true"')}`
+    };
+    const after = (view) => {
+      const panel = view.querySelector('#kpi-detail');
+      const body = panel.querySelector('.kpi-detail-card');
+      const cards = [...view.querySelectorAll('[data-kpi]')];
+      const open = (key) => {
+        dashOpenKpi = key && details[key] ? key : '';
+        cards.forEach((c) => {
+          const on = c.dataset.kpi === dashOpenKpi;
+          c.classList.toggle('is-open', on);
+          c.setAttribute('aria-expanded', String(on));
+        });
+        if (dashOpenKpi) body.innerHTML = details[dashOpenKpi]();
+        panel.classList.toggle('open', !!dashOpenKpi);
+        alignTab();
+      };
+      // 열린 박스 위치에 맞춰 요약 창 윗선의 '이음 부분'을 계산
+      const alignTab = () => {
+        const card = cards.find((c) => c.dataset.kpi === dashOpenKpi);
+        if (!card) return;
+        const pr = body.getBoundingClientRect();
+        const cr = card.getBoundingClientRect();
+        const bw = 1.5;
+        body.style.setProperty('--tab-left', `${cr.left - pr.left - bw}px`);
+        body.style.setProperty('--tab-w', `${cr.width}px`);
+        body.classList.toggle('tab-first', cr.left - pr.left < 2);
+        body.classList.toggle('tab-last', pr.right - cr.right < 2);
+        card.classList.toggle('tab-first', cr.left - pr.left < 2);
+        card.classList.toggle('tab-last', pr.right - cr.right < 2);
+      };
+      if (dashTabResize) window.removeEventListener('resize', dashTabResize);
+      dashTabResize = alignTab;
+      window.addEventListener('resize', alignTab);
+      cards.forEach((c) => c.addEventListener('click', () => open(c.dataset.kpi === dashOpenKpi ? '' : c.dataset.kpi)));
+      open(dashOpenKpi);
+    };
     return {
+      after,
       html: `<div class="dashboard-v2">
         <header class="dashboard-hero">
-          <div class="dashboard-hero-copy"><p class="dashboard-eyebrow">SCHOOL BUS SAFETY CENTER</p><h1>대시보드</h1><p class="sub">통학버스의 운행 현황과 안전 상황을 한눈에 확인하세요.</p></div><div class="dashboard-hero-art" aria-hidden="true" style="width:520px;max-width:100%;height:132px;display:flex;align-items:center;justify-content:center;overflow:visible;pointer-events:none"><img src="./dashboard_route_banner.png" alt="" style="display:block;width:120%;max-width:none;height:120%;object-fit:contain;flex-shrink:0"></div>
-          <div class="dashboard-hero-meta"><strong>${esc(dateLabel)}</strong><span><span class="dashboard-meta-dot"></span>${esc(scope)} 기준</span></div>
+          <div class="dashboard-hero-copy"><p class="dashboard-date">${esc(dateLabel)}</p><h1>대시보드</h1><p class="sub">${esc(heroLine)}</p><p class="dashboard-scope">${esc(scope)} 기준</p></div><div class="dashboard-hero-art" aria-hidden="true"><img src="./tonghaki_side_bus.svg" alt=""></div>
         </header>
         <section class="dashboard-kpis" aria-label="핵심 안전 현황">
-          ${kpi('blue', '운행 중인 버스', activeBusCount, '대', '현재 진행 중인 운행 기록 기준', '#/trips', uiIcon('bus', 30))}
-          ${kpi('danger', '미해결 경고', unresolved, '건', `미확인 ${s.alert_by_status?.OPEN || 0}건 · 확인함 ${s.alert_by_status?.ACKED || 0}건`, '#/alerts', uiIcon('bell', 30))}
-          ${kpi('warning', '미하차 의심', riskCount, '건', '선택 기간의 미하차 의심 운행', '#/trips', uiIcon('people', 30))}
-          <a class="overview-kpi success" href="#/trips" data-dash-trip-link="true"><div class="overview-kpi-top"><span class="overview-kpi-icon">${uiIcon('check',30)}</span></div><span class="overview-kpi-label">정상 운행률</span><strong>${totalTrips ? (normalCount / totalTrips * 100).toFixed(1) : '0.0'}<small>%</small></strong><span class="overview-kpi-note">정상 ${normalCount}건 / 전체 ${totalTrips}건</span><span class="overview-rate-ring" style="--rate:${normalPct}%"><b>${normalPct}%</b></span></a>
-
+          ${kpi('buses', 'blue', '운행 중인 버스', activeBusCount, '대', '현재 진행 중인 운행 기록 기준', uiIcon('bus', 30))}
+          ${kpi('alerts', 'danger', '미해결 경고', unresolved, '건', `미확인 ${s.alert_by_status?.OPEN || 0}건 · 확인함 ${s.alert_by_status?.ACKED || 0}건`, uiIcon('bell', 30))}
+          ${kpi('missed', 'warning', '미하차 의심', riskCount, '건', '선택 기간의 미하차 의심 운행', uiIcon('people', 30))}
+          ${kpi('rate', 'success', '정상 운행률', totalTrips ? (normalCount / totalTrips * 100).toFixed(1) : '0.0', '%', `정상 ${normalCount}건 / 전체 ${totalTrips}건`, uiIcon('check', 30), `<span class="overview-rate-ring" style="--rate:${normalPct}%"><b>${normalPct}%</b></span>`)}
         </section>
+        <div class="kpi-detail" id="kpi-detail" role="region" aria-label="선택한 항목 요약"><div class="kpi-detail-inner"><div class="kpi-detail-card"></div></div></div>
         ${unresolved > 0 ? `
           <section class="dashboard-urgent" aria-label="미해결 경고">
             <div class="dashboard-urgent-head">
-              <strong>🚨 안전 조치가 필요한 경고 <span>${unresolved}건</span></strong>
-              <a href="#/alerts" data-dash-unresolved="true">경고 관리로 이동 →</a>
+              <strong><i class="dash-dot" aria-hidden="true"></i>안전 조치가 필요한 경고 <span>${unresolved}건</span></strong>
+              <a href="#/alerts" data-dash-unresolved="true">경고 관리로 이동</a>
             </div>
             <div class="dashboard-urgent-list">
               ${unresolvedAlerts.map(a => `
@@ -402,28 +455,25 @@
           </section>
         ` : ''}
         <div class="dashboard-main-grid">
-          <section class="dashboard-panel dashboard-chart-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><span class="dashboard-title-icon chart-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="5" width="4" height="16" rx="1"/><rect x="17" y="9" width="4" height="12" rx="1"/></svg></span><div><h2>운행 및 경고 추이</h2><p>선택 기간의 일별 발생 현황</p></div></div><div class="seg" role="group" aria-label="조회 기간">${periods.map(([key,label]) => `<button type="button" data-act="period" data-value="${key}" aria-pressed="${dashPeriod === key}">${label}</button>`).join('')}</div></div><div class="dashboard-chart-content">${chartSvg(s.daily || [])}</div></section>
-          <section class="dashboard-panel dashboard-fleet-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><span class="dashboard-title-icon bus-icon" aria-hidden="true">${uiIcon('bus', 22)}</span><div><h2>버스별 현재 상태</h2><p>서버의 운행 상태 기록 기준</p></div></div><a href="#/buses">전체 보기 →</a></div><div class="dashboard-fleet-table-head"><span>버스(차량번호)</span><span>배정 학생</span><span>운행 상태</span></div><div class="dashboard-fleet-list">${buses.map(b => {
+          <section class="dashboard-panel dashboard-chart-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><div><h2>운행 및 경고 추이</h2></div></div><div class="seg" role="group" aria-label="조회 기간">${periods.map(([key,label]) => `<button type="button" data-act="period" data-value="${key}" aria-pressed="${dashPeriod === key}">${label}</button>`).join('')}</div></div><div class="dashboard-chart-content">${chartSvg(s.daily || [])}</div></section>
+          <section class="dashboard-panel dashboard-fleet-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><div><h2>버스별 현재 상태</h2></div></div><a href="#/buses">전체 보기</a></div><div class="dashboard-fleet-table-head"><span>버스(차량번호)</span><span>배정 학생</span><span>운행 상태</span></div><div class="dashboard-fleet-list">${buses.map(b => {
             const t = activeByBus.get(String(b.id));
             const status = t ? '운행 중' : '대기 중';
             const cls = t ? 'running' : 'idle';
-            return `<${t ? 'a' : 'div'} class="dashboard-fleet-row" ${t ? `href="#/trips/${t.id}"` : ''}><span class="dashboard-bus-icon" aria-hidden="true">${uiIcon('bus', 26)}</span><span class="dashboard-fleet-info"><strong>${esc(b.name)}</strong><small>${esc(b.plate_no || '차량번호 없음')}</small></span><span class="dashboard-fleet-assigned">배정 ${b.student_count ?? 0}명</span><span class="bus-status ${cls}">${status}</span>${t ? '<span class="dashboard-row-chevron">›</span>' : ''}</${t ? 'a' : 'div'}>`;
+            return `<${t ? 'a' : 'div'} class="dashboard-fleet-row" ${t ? `href="#/trips/${t.id}"` : ''}><span class="dashboard-fleet-info"><strong>${esc(b.name)}</strong><small>${esc(b.plate_no || '차량번호 없음')}</small></span><span class="dashboard-fleet-assigned">배정 ${b.student_count ?? 0}명</span><span class="bus-status ${cls}">${status}</span>${t ? '<span class="dashboard-row-chevron">›</span>' : ''}</${t ? 'a' : 'div'}>`;
           }).join('') || '<p class="empty">등록된 차량이 없습니다.</p>'}</div></section>
         </div>
         <div class="dashboard-bottom-grid">
-          <section class="dashboard-panel dashboard-results-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><span class="dashboard-title-icon">${uiIcon('check',22)}</span><div><h2>운행 결과 현황</h2><p>선택 기간의 운행 결과</p></div></div></div>
-          <div class="overview-distribution"><div class="overview-distribution-heading"><strong>운행 결과 현황</strong><span>${esc(periodText)}</span></div>
-            <div class="overview-distribution-body"><div class="overview-donut" style="--ring:${ring}" role="img" aria-label="정상 ${normalCount}건, 확인 필요 ${checkCount}건, 미하차 의심 ${riskCount}건"><div><strong>${totalTrips}</strong><small>총 운행</small></div></div>
+          <section class="dashboard-panel dashboard-results-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><div><h2>운행 결과 현황</h2></div></div></div>
+          <div class="overview-distribution"><div class="overview-distribution-body"><div class="overview-donut" style="--ring:${ring}" role="img" aria-label="정상 ${normalCount}건, 확인 필요 ${checkCount}건, 미하차 의심 ${riskCount}건"><div><strong>${totalTrips}</strong><small>총 운행</small></div></div>
             <div class="overview-donut-legend"><span><i class="normal"></i>정상 <strong>${normalCount}건</strong></span><span><i class="check"></i>확인 필요 <strong>${checkCount}건</strong></span><span><i class="missed"></i>미하차 의심 <strong>${riskCount}건</strong></span></div></div>
           </div>
           </section>
-          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 위험 경고</h2><p>최근 발생한 경고 기록</p></div><a href="#/alerts">전체 보기 →</a></div><div class="dashboard-feed">${recentAlerts.map(a => `<a href="#/alerts/${a.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon ${a.status === 'RESOLVED' ? 'resolved' : 'danger'}">
-            ${a.status === 'RESOLVED' ? '✓' : '!'}
-          </span><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">✓</span><strong>최근 경고 없음</strong><small>선택한 기간에 발생한 경고가 없습니다.</small></div>'}</div></section>
-          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 운행 기록</h2><p>최근 운행 결과 및 상태</p></div><a href="#/trips">전체 보기 →</a></div><div class="dashboard-feed">${recentTrips.map(t => `<a href="#/trips/${t.id}" class="dashboard-feed-row"><span class="dashboard-feed-icon bus">🚌</span><span class="dashboard-feed-info"><strong>${esc(t.bus_name || '차량 정보 없음')}</strong><small>${t.started_at ? esc(new Date(t.started_at).toLocaleString('ko-KR', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false})) : '시작 시간 미기록'}· 승차 ${num(t.boarding_count)}명 / 하차 ${num(t.alighted_count)}명</small></span><span class="dashboard-feed-tags">${tripStatus(t)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">▤</span><strong>운행 기록 없음</strong><small>운행이 시작되면 기록이 표시됩니다.</small></div>'}</div></section>
+          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 위험 경고</h2></div><a href="#/alerts">전체 보기</a></div><div class="dashboard-feed">${recentAlerts.map(a => `<a href="#/alerts/${a.id}" class="dashboard-feed-row"><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">✓</span><strong>최근 경고 없음</strong><small>선택한 기간에 발생한 경고가 없습니다.</small></div>'}</div></section>
+          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 운행 기록</h2></div><a href="#/trips">전체 보기</a></div><div class="dashboard-feed">${recentTrips.map(t => `<a href="#/trips/${t.id}" class="dashboard-feed-row"><span class="dashboard-feed-info"><strong>${esc(t.bus_name || '차량 정보 없음')}</strong><small>${t.started_at ? esc(new Date(t.started_at).toLocaleString('ko-KR', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false})) : '시작 시간 미기록'} · 승차 ${num(t.boarding_count)}명 / 하차 ${num(t.alighted_count)}명</small></span><span class="dashboard-feed-tags">${tripStatus(t)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">▤</span><strong>운행 기록 없음</strong><small>운행이 시작되면 기록이 표시됩니다.</small></div>'}</div></section>
         </div>
         <div class="dashboard-secondary-section">
-          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>보호자 연결 요청</h2><p>승인을 기다리는 신청</p></div><a href="#/requests">전체 보기 →</a></div><div class="dashboard-feed">${requests ? (requests.items || []).map(r => `<a href="#/requests" class="dashboard-feed-row"><span class="dashboard-feed-icon person">♙</span><span class="dashboard-feed-info"><strong>${esc(r.user?.name || '신청자')}</strong><small>${esc(r.child_name || '학생 정보 없음')}${r.class_name ? ` (${esc(r.class_name)})` : ''} · ${fmtTime(r.created_at)}</small></span><span class="badge warn">승인 대기</span></a>`).join('') || '<div class="dashboard-empty-state"><span class="dashboard-empty-icon">✓</span><p>대기 중인 연결 요청이 없습니다.</p></div>'
+          <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>보호자 연결 요청</h2></div><a href="#/requests">전체 보기</a></div><div class="dashboard-feed">${requests ? (requests.items || []).map(r => `<a href="#/requests" class="dashboard-feed-row"><span class="dashboard-feed-info"><strong>${esc(r.user?.name || '신청자')}</strong><small>${esc(r.child_name || '학생 정보 없음')}${r.class_name ? ` (${esc(r.class_name)})` : ''} · ${fmtTime(r.created_at)}</small></span><span class="badge warn">승인 대기</span></a>`).join('') || '<div class="dashboard-empty-state"><span class="dashboard-empty-icon">✓</span><p>대기 중인 연결 요청이 없습니다.</p></div>'
       : '<div class="dashboard-empty-state"><p>연결 요청 정보를 불러올 수 없습니다.</p></div>'}</div></section>
         </div>
         <footer class="dashboard-footer">
@@ -3188,7 +3238,7 @@
 
       document.title =
         (unresolvedTotal ? `(${unresolvedTotal}) ` : '') +
-        '통학버스 안전관리';
+        '통학이';
 
     } catch {
       /* 배지 조회 실패 시 다른 화면 기능은 유지 */
