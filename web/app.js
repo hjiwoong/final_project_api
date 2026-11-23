@@ -418,7 +418,13 @@
       if (dashTabResize) window.removeEventListener('resize', dashTabResize);
       dashTabResize = alignTab;
       window.addEventListener('resize', alignTab);
-      cards.forEach((c) => c.addEventListener('click', () => open(c.dataset.kpi === dashOpenKpi ? '' : c.dataset.kpi)));
+      cards.forEach((c) => {
+        c.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          open(c.dataset.kpi === dashOpenKpi ? '' : c.dataset.kpi);
+        });
+      });
       open(dashOpenKpi);
     };
     return {
@@ -431,7 +437,7 @@
           ${kpi('buses', 'blue', '운행 중인 버스', activeBusCount, '대', '현재 진행 중인 운행 기록 기준', uiIcon('bus', 30))}
           ${kpi('alerts', 'danger', '미해결 경고', unresolved, '건', `미확인 ${s.alert_by_status?.OPEN || 0}건 · 확인함 ${s.alert_by_status?.ACKED || 0}건`, uiIcon('bell', 30))}
           ${kpi('missed', 'warning', '미하차 의심', riskCount, '건', '선택 기간의 미하차 의심 운행', uiIcon('people', 30))}
-          ${kpi('rate', 'success', '정상 운행률', totalTrips ? (normalCount / totalTrips * 100).toFixed(1) : '0.0', '%', `정상 ${normalCount}건 / 전체 ${totalTrips}건`, uiIcon('check', 30), `<span class="overview-rate-ring" style="--rate:${normalPct}%"><b>${normalPct}%</b></span>`)}
+          ${kpi('rate', 'success', '정상 운행률', totalTrips ? (normalCount / totalTrips * 100).toFixed(1) : '0.0', '%', `정상 ${normalCount}건 / 전체 ${totalTrips}건`, uiIcon('check', 30))}
         </section>
         <div class="kpi-detail" id="kpi-detail" role="region" aria-label="선택한 항목 요약"><div class="kpi-detail-inner"><div class="kpi-detail-card"></div></div></div>
         ${unresolved > 0 ? `
@@ -460,13 +466,43 @@
             const t = activeByBus.get(String(b.id));
             const status = t ? '운행 중' : '대기 중';
             const cls = t ? 'running' : 'idle';
-            return `<${t ? 'a' : 'div'} class="dashboard-fleet-row" ${t ? `href="#/trips/${t.id}"` : ''}><span class="dashboard-fleet-info"><strong>${esc(b.name)}</strong><small>${esc(b.plate_no || '차량번호 없음')}</small></span><span class="dashboard-fleet-assigned">배정 ${b.student_count ?? 0}명</span><span class="bus-status ${cls}">${status}</span>${t ? '<span class="dashboard-row-chevron">›</span>' : ''}</${t ? 'a' : 'div'}>`;
+            return `<${t ? 'a' : 'div'} class="dashboard-fleet-row" ${t ? `href="#/trips/${t.id}"` : ''}><span class="dashboard-fleet-info"><strong>${esc(b.name)}</strong><small>${esc(b.plate_no || '차량번호 없음')}</small></span><span class="dashboard-fleet-assigned">배정 ${b.student_count ?? 0}명</span><span class="bus-status ${cls}">${status}</span></${t ? 'a' : 'div'}>`;
           }).join('') || '<p class="empty">등록된 차량이 없습니다.</p>'}</div></section>
         </div>
         <div class="dashboard-bottom-grid">
           <section class="dashboard-panel dashboard-results-panel"><div class="dashboard-panel-head"><div class="dashboard-title-group"><div><h2>운행 결과 현황</h2></div></div></div>
-          <div class="overview-distribution"><div class="overview-distribution-body"><div class="overview-donut" style="--ring:${ring}" role="img" aria-label="정상 ${normalCount}건, 확인 필요 ${checkCount}건, 미하차 의심 ${riskCount}건"><div><strong>${totalTrips}</strong><small>총 운행</small></div></div>
-            <div class="overview-donut-legend"><span><i class="normal"></i>정상 <strong>${normalCount}건</strong></span><span><i class="check"></i>확인 필요 <strong>${checkCount}건</strong></span><span><i class="missed"></i>미하차 의심 <strong>${riskCount}건</strong></span></div></div>
+          <div class="overview-distribution">
+            <div class="overview-distribution-body">
+              <div class="overview-donut" style="--ring:${ring}"
+                role="img"
+                aria-label="정상 ${normalCount}건, 확인 필요 ${checkCount}건, 미하차 의심 ${riskCount}건">
+                <div>
+                  <strong>${totalTrips}</strong>
+                  <small>총 운행</small>
+                </div>
+              </div>
+          
+              <div class="overview-donut-legend">
+                <span><i class="normal"></i>정상 <strong>${normalCount}건</strong></span>
+                <span><i class="check"></i>확인 필요 <strong>${checkCount}건</strong></span>
+                <span><i class="missed"></i>미하차 의심 <strong>${riskCount}건</strong></span>
+              </div>
+            </div>
+          
+            <div class="dashboard-result-stats">
+              <div class="dashboard-result-stat normal">
+                <small>정상</small>
+                <strong>${normalPct}%</strong>
+              </div>
+              <div class="dashboard-result-stat check">
+                <small>확인 필요</small>
+                <strong>${checkPct}%</strong>
+              </div>
+              <div class="dashboard-result-stat missed">
+                <small>미하차 의심</small>
+                <strong>${missedPct}%</strong>
+              </div>
+            </div>
           </div>
           </section>
           <section class="dashboard-panel"><div class="dashboard-panel-head"><div><h2>최근 위험 경고</h2></div><a href="#/alerts">전체 보기</a></div><div class="dashboard-feed">${recentAlerts.map(a => `<a href="#/alerts/${a.id}" class="dashboard-feed-row"><span class="dashboard-feed-info"><strong>${esc(a.message || '경고 발생')}</strong><small>${esc(a.bus_name || '차량 미상')} · ${fmtTime(a.created_at)}</small></span><span class="dashboard-feed-tags">${badge(LEVEL, a.level)}${badge(ALERT_STATUS, a.status)}</span></a>`).join('') || '<div class="dashboard-compact-empty"><span aria-hidden="true">✓</span><strong>최근 경고 없음</strong><small>선택한 기간에 발생한 경고가 없습니다.</small></div>'}</div></section>
@@ -2538,11 +2574,10 @@
                       ${visibleDrivers.map((u) => {
                         const driverBuses = buses.filter((b) => Number(b.driver_id) === Number(u.id));
                         return `<tr><td><strong>${esc(u.name)}</strong></td><td>${esc(u.email)}</td><td>${driverBuses.length ? esc(driverBuses.map((b) => b.name).join(', ')) : '—'}</td><td><span class="driver-status ${driverBuses.length ? 'is-assigned' : ''}">${driverBuses.length ? '배정 완료' : '미배정'}</span></td></tr>`;
-                      }).join('') || '<tr><td colspan="4" class="empty">확인된 기사가 없습니다. 아래에서 기사를 등록하거나 버스에 담당 기사를 배정하세요.</td></tr>'}
+                      }).join('') || '<tr><td colspan="4" class="empty">배정된 기사가 없습니다. 아래에서 기사를 등록하거나 버스에 담당 기사를 배정하세요.</td></tr>'}
                     </tbody>
                   </table>
                 </div>
-                <p class="driver-list-note">차량 변경은 아래 <strong>버스 등록 및 학생 배정</strong>에서 해당 버스의 수정 버튼을 이용하세요.</p>
               </div>
               <details class="driver-create-toggle">
                 <summary>+ 신규 기사 등록</summary>
@@ -2556,7 +2591,6 @@
                   <p class="driver-permission-note">현재 시스템의 기사 계정은 ADMIN 권한으로 생성됩니다. 신뢰할 수 있는 담당자만 등록하세요.</p>
                 </form>
               </details>
-              <p class="driver-list-note driver-data-note"></p>
             </div>
           </details>
         </section>
