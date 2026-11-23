@@ -138,6 +138,31 @@ def generate_json(prompt: str, image_bytes: bytes | None = None, system: str | N
         return {}
 
 
+def generate_text(prompt: str, system: str | None = None, max_tokens: int = 1500,
+                  temperature: float = 0.5, history: list[tuple[str, str]] | None = None) -> str:
+    """JSON 강제 없이 글로 받는다 (챗봇용).
+
+    JSON 모드는 답이 길어져 중간에 잘리면 파싱이 통째로 실패해서 문서 발췌 답으로 떨어졌다.
+    글로 받으면 조금 잘려도 앞부분은 쓸 수 있다."""
+    from google.genai import types
+
+    contents: list = [
+        types.Content(role="model" if r == "model" else "user", parts=[types.Part.from_text(text=t)])
+        for r, t in (history or []) if t
+    ]
+    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=prompt)]))
+    response = _with_retry(lambda: get_client().models.generate_content(
+        model=GEMINI_MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            max_output_tokens=max_tokens,
+            temperature=temperature,
+        ),
+    ), tries=2)
+    return (getattr(response, "text", None) or "").strip()
+
+
 def _l2_normalize(vec: list[float]) -> list[float]:
     norm = math.sqrt(sum(v * v for v in vec)) or 1.0
     return [v / norm for v in vec]
