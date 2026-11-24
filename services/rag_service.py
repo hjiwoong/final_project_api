@@ -466,28 +466,40 @@ def _mock_answer(question: str, docs: list[dict]) -> str:
     lines = ["관련 수칙을 찾았습니다.\n"]
     for i, d in enumerate(docs, 1):
         lines.append(f"[{i}] {d['title']}\n{d['content']}\n")
-    lines.append("※ 위 문서 발췌입니다. 자세한 내용은 출처 문서를 확인해 주세요.")
+    lines.append("※ 지금은 AI 답변이 어려워 문서 발췌로 대신했습니다. "
+                 f"급한 경우 기관({INSTITUTION_PHONE})에 바로 연락해 주세요.")
     return "\n".join(lines)
 
 
-_SYSTEM = """당신은 어린이 통학버스 미하차 예방 서비스의 안내 AI입니다.
-반드시 아래 [문서]에 있는 내용만 근거로 답하세요. 문서에 없으면 지어내지 말고
-"등록된 수칙에서 찾지 못했습니다. 관리자(학교·기관)에게 문의해 주세요."라고 답하세요.
-법 조항은 문서에 적힌 그대로만 인용하고, 문서에 없는 처벌·과태료 금액 등을 추측하지 마세요.
-근거 문장 끝에 [1], [2]처럼 문서 번호를 붙이세요. 존댓말, 3~6문장."""
+INSTITUTION_PHONE = os.getenv("INSTITUTION_PHONE", "010-0000-0000")
+
+_SYSTEM = """당신은 어린이 통학버스 미하차 예방 서비스(앱 이름: 통학이)의 안전 안내 AI입니다.
+목표: 수칙을 그대로 읽어 주지 말고, [현재 경고 상황]에 맞춰 '지금 무엇을 하면 되는지'를 알려 주세요.
+
+- 첫 문장에서 지금 상황을 한 줄로 정리하세요. (예: "1호차에서 미하차 의심 경고가 나서 기관이 확인 중이에요.")
+- 이어서 할 일을 1. 2. 3. 번호로 짧게 (보호자라면: 경고 상태 확인 → 아이가 오늘 안 탔으면 기관에 알리기 → 급하면 기관 전화).
+- 근거는 [문서]에서 찾고, 쓴 문장 끝에 [1], [2]처럼 번호를 붙이세요. 관련 없는 문서는 무시하세요.
+- 문서에 딱 맞는 내용이 없어도 거절만 하지 말고, 확인할 것과 연락할 곳을 안내하세요.
+- 법 조항·벌칙 금액은 문서에 있는 것만 말하세요. 추측하지 마세요.
+- 기관 연락처는 {phone} 입니다. 기관에 연락하라고 할 때 함께 적고, 다른 번호는 지어내지 마세요(119 제외).
+- 아이가 차에 남아 있을 수 있으면 무엇보다 먼저 '즉시 차량 직접 확인, 상태가 나쁘면 119'.
+- 확인되지 않은 일로 "괜찮을 거예요"라고 안심시키지 마세요.
+- 친절한 존댓말, 3~6문장. 답변 글만 쓰세요(JSON·머리말 없이)."""
 
 
 def _real_answer(question: str, docs: list[dict], context: str | None) -> str:
     doc_txt = "\n\n".join(f"[{i}] {d['title']} ({d['source']})\n{d['content']}" for i, d in enumerate(docs, 1))
-    prompt = f"""[문서]
+    prompt = f"""[현재 경고 상황]
+{context or '(없음)'}
+
+[문서]
 {doc_txt}
-{f'[현재 경고 상황]{chr(10)}{context}' if context else ''}
 
-[질문] {question}
-
-JSON 으로만: {{"answer": "..."}}"""
-    data = gemini_client.generate_json(prompt, system=_SYSTEM, max_tokens=600)
-    return str(data.get("answer") or "").strip()
+[질문] {question}"""
+    # JSON 모드는 답이 잘리면 통째로 실패해 '문서 발췌'로 떨어졌다 → 글로 받는다
+    return gemini_client.generate_text(
+        prompt, system=_SYSTEM.format(phone=INSTITUTION_PHONE), max_tokens=1200, temperature=0.4,
+    )
 
 
 def answer(question: str, context: str | None = None, k: int = 4) -> dict:

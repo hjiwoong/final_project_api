@@ -227,11 +227,13 @@ def chat(message: str, history: list | None = None, context: dict | None = None)
     # 검색은 임베딩이 실패해도 글자 매칭으로 대체되므로, 여기서는 문서만 받아 쓴다
     docs, _ = rag_service.search(_search_query(message, history), SEARCH_K)
     if not USE_REAL_AI:
+        log.info("💬 [Chat] mode=mock (GEMINI_API_KEY 없음 또는 CHAT_ENABLED=false) → 문서 발췌로 답함")
         return _normalize(_mock_reply(message, history, context, docs), context, message, docs, "mock")
     try:
         result = _real_reply(message, history, context, docs)
         if not str((result or {}).get("reply") or "").strip():
             raise ValueError("빈 답변")
+        log.info("💬 [Chat] mode=real · 문서 %d개", len(docs))
         return _normalize(result, context, message, docs, "real")
     except Exception as e:  # noqa: BLE001
         log.warning("❌ [Chat] 응답 생성 실패: %s: %s", type(e).__name__, e)
