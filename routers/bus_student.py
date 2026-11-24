@@ -150,6 +150,35 @@ def admin_attendance_file(file_id: int, db: Session = Depends(get_db)):
                     headers={"Cache-Control": "private, no-store"})
 
 
+@router.get("/attendance/{attendance_id}")
+def admin_attendance_detail(attendance_id: int, db: Session = Depends(get_db)):
+    """관리자: 결석 알림을 눌렀을 때 — 학생·날짜·사유·첨부 (학부모가 취소했으면 is_absent=false)"""
+    from routers.student import REASON_LABELS, file_to_dict, reason_text   # 순환 import 방지
+
+    a = db.get(Attendance, attendance_id)
+    if not a:
+        raise HTTPException(404, "결석 기록을 찾을 수 없습니다")
+    s = a.student
+    bus = (
+        db.query(Bus)
+        .join(BusStudent, BusStudent.bus_id == Bus.id)
+        .filter(BusStudent.student_id == a.student_id)
+        .first()
+    )
+    return {
+        "attendance_id": a.id,
+        "date": a.date,
+        "is_absent": a.is_absent,
+        "student": {"id": s.id, "name": s.name, "class_name": s.class_name} if s else None,
+        "bus": {"id": bus.id, "name": bus.name, "plate_no": bus.plate_no} if bus else None,
+        "reason_type": a.reason_type,
+        "reason_label": REASON_LABELS.get(a.reason_type or "", a.reason_type),
+        "reason_memo": a.reason_memo,
+        "reason_text": reason_text(a),
+        "files": [file_to_dict(f) for f in a.files],
+    }
+
+
 @router.get("/{bus_id}/students")
 def list_bus_students(
     bus_id: int,

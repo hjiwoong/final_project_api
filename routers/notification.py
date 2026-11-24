@@ -27,6 +27,7 @@ def notification_to_dict(n: Notification) -> dict:
         "trip_id": n.trip_id,
         "category": n.category,
         "event_type": n.event_type,
+        "attendance_id": n.attendance_id,
     }
 
 
@@ -59,6 +60,21 @@ def my_notifications(
         "total": total,
         "unread_count": unread_count,
     }
+
+
+@router.post("/read-all")
+def read_all_notifications(
+    me: User = Depends(require_terms_agreed),
+    db: Session = Depends(get_db),
+):
+    """내 알림 모두 읽음 (앱 알림 탭 '모두 읽음' 버튼 — 이전엔 서버에 없어 404)"""
+    count = (
+        db.query(Notification)
+        .filter(Notification.user_id == me.id, Notification.read_at.is_(None))
+        .update({Notification.read_at: datetime.now()}, synchronize_session=False)
+    )
+    db.commit()
+    return {"updated": count, "unread_count": 0}
 
 
 @router.post("/{notification_id}/read")

@@ -50,11 +50,29 @@ def create_bus(body: BusCreate, db: Session = Depends(get_db)):
 
 @router.get("")
 def list_buses(db: Session = Depends(get_db)):
+    """버스 목록 + 배정 학생 수 + 오늘 결석 수 (기사 앱 운행 시작 화면의 '탑승 예정' 인원)"""
+    from core.time import today_kst
+    from models.models import Attendance
+
     buses = db.query(Bus).all()
     result = []
     for b in buses:
-        cnt = db.query(BusStudent).filter(BusStudent.bus_id == b.id).count()
-        result.append(bus_to_dict(b, cnt))
+        ids = [r[0] for r in db.query(BusStudent.student_id).filter(BusStudent.bus_id == b.id)]
+        absent = 0
+        if ids:
+            absent = (
+                db.query(Attendance)
+                .filter(
+                    Attendance.student_id.in_(ids),
+                    Attendance.date == today_kst(),
+                    Attendance.is_absent.is_(True),
+                )
+                .count()
+            )
+        d = bus_to_dict(b, len(ids))
+        d["absent_today"] = absent
+        d["expected_today"] = len(ids) - absent
+        result.append(d)
     return result
 
 @router.put("/{bus_id}")

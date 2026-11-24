@@ -464,6 +464,7 @@ def set_attendance(
         if student:
             notification_ids = notifier.create_attendance_notifications(
                 db, student, body.date, body.is_absent, reason=reason_text(a),
+                attendance_id=a.id,
             )
     db.commit()
     if notification_ids:

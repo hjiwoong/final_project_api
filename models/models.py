@@ -397,6 +397,12 @@ class Notification(Base):
         server_default="URGENT",
     )
     event_type = Column(String(30), nullable=True)
+    # 결석 신청·취소 알림이면 해당 결석 기록 (관리자 앱에서 눌러 사유·첨부 확인)
+    attendance_id = Column(
+        Integer,
+        ForeignKey("attendances.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     title = Column(String(255), nullable=False)
     body = Column(Text, nullable=True)

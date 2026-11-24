@@ -130,6 +130,7 @@ def init_db():
             "trip_id": "INT NULL",
             "category": "VARCHAR(20) NOT NULL DEFAULT 'URGENT'",
             "event_type": "VARCHAR(30) NULL",
+            "attendance_id": "INT NULL",
         }
 
         notification_existing = {
@@ -168,5 +169,13 @@ def init_db():
                 "SET category = 'URGENT' "
                 "WHERE alert_id IS NOT NULL "
                 "AND (category IS NULL OR category = '')"
+            )
+        )
+        # '확인 필요' 경고 알림이 URGENT 로 저장돼 앱 '확인 필요' 탭이 비어 있던 것 보정
+        connection.execute(
+            text(
+                "UPDATE notifications SET category = 'CHECK' "
+                "WHERE category = 'URGENT' AND alert_id IN "
+                "(SELECT id FROM alerts WHERE level = 'CHECK')"
             )
         )

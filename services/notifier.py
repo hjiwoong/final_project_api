@@ -121,6 +121,8 @@ def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
                 user_id=uid,
                 title=title,
                 body=body,
+                # 앱 알림 탭의 '긴급'/'확인 필요' 구분 (이전엔 모두 URGENT 로 저장됐다)
+                category="URGENT" if level == AlertLevel.URGENT else "CHECK",
             )
         )
 
@@ -393,6 +395,7 @@ def create_attendance_notifications(
     day: date,
     is_absent: bool,
     reason: str | None = None,
+    attendance_id: int | None = None,
 ) -> list[int]:
     """학부모가 결석을 신청·취소하면 관리자(기사 포함) 전원에게 알림을 저장한다.
 
@@ -422,6 +425,7 @@ def create_attendance_notifications(
             trip_id=None,
             category="ATTENDANCE",
             event_type="ABSENT" if is_absent else "ABSENT_CANCELED",
+            attendance_id=attendance_id,
             title=title,
             body=body,
         )
