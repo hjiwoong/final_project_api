@@ -17,8 +17,8 @@ from sqlalchemy.orm import Session
 
 from database.db_connection import SessionLocal
 from models.models import (
-    Alert, AlertLevel, AlertStatus, Attendance, BoardingEvent, BusStudent,
-    Guardian, Notification, PushToken, Trip, User, UserRole,
+    Alert, AlertLevel, AlertStatus, Attendance, BoardingEvent, Bus, BusStudent,
+    Guardian, Notification, PushToken, Student, Trip, User, UserRole,
 )
 
 logger = logging.getLogger(__name__)
@@ -383,8 +383,55 @@ def create_trip_notifications(
     return [notification.id for notification in notifications]
 
 
+_WEEKDAYS = "월화수목금토일"
+
+
+def create_attendance_notifications(
+    db: Session,
+    student: Student,
+    day: date,
+    is_absent: bool,
+    reason: str | None = None,
+) -> list[int]:
+    """학부모가 결석을 신청·취소하면 관리자(기사 포함) 전원에게 알림을 저장한다.
+
+    긴급 경고와 같은 기준(role=ADMIN 전원)으로 보낸다. 푸시는 send_trip_pushes 로 보낸다."""
+    bus = (
+        db.query(Bus)
+        .join(BusStudent, BusStudent.bus_id == Bus.id)
+        .filter(BusStudent.student_id == student.id)
+        .first()
+    )
+    who = student.name + (f"({student.class_name})" if student.class_name else "")
+    when = f"{day.month}월 {day.day}일({_WEEKDAYS[day.weekday()]})"
+    if day == date.today():
+        when = "오늘 " + when
+    title = "결석 신청" if is_absent else "결석 취소"
+    body = (f"{who} · {bus.name if bus else '버스 미배정'} · {when} "
+            + ("결석 신청했습니다. 탑승 예정 인원에서 빠집니다." if is_absent
+               else "결석을 취소했습니다. 다시 탑승 예정입니다."))
+    if is_absent and reason:
+        body += f" (사유: {reason[:60]})"
+
+    notifications = []
+    for (uid,) in db.query(User.id).filter(User.role == UserRole.ADMIN).all():
+        n = Notification(
+            user_id=uid,
+            alert_id=None,
+            trip_id=None,
+            category="ATTENDANCE",
+            event_type="ABSENT" if is_absent else "ABSENT_CANCELED",
+            title=title,
+            body=body,
+        )
+        db.add(n)
+        notifications.append(n)
+    db.flush()
+    return [n.id for n in notifications]
+
+
 def send_trip_pushes(notification_ids: list[int]) -> None:
-    """DB에 저장된 운행 알림을 학부모 기기로 전송한다."""
+    """DB에 저장된 알림(운행 시작·종료, 결석 신청·취소)을 기기로 전송한다."""
     if not notification_ids:
         return
 
@@ -455,7 +502,7 @@ def send_trip_pushes(notification_ids: list[int]) -> None:
                     data={
                         "type": "trip_notification",
                         "notification_id": str(notification_id),
-                        "trip_id": str(trip_id),
+                        "trip_id": str(trip_id) if trip_id else "",
                         "event_type": event_type,
                     },
                     android=messaging.AndroidConfig(

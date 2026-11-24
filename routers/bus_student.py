@@ -1,12 +1,13 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.security import require_admin
 from database.db_connection import get_db
-from models.models import Attendance, Bus, BusStudent, Student
+from models.models import Attendance, AttendanceFile, Bus, BusStudent, Student
 from routers.location import student_location
 
 router = APIRouter(
@@ -77,7 +78,7 @@ def attendance_calendar(
     end = date(year + month // 12, month % 12 + 1, 1)
     rows = (
         db.query(
-            Attendance.date,
+            Attendance,
             Bus.id,
             Bus.name,
             Bus.plate_no,
@@ -98,7 +99,10 @@ def attendance_calendar(
     )
 
     days: dict[date, dict[int, dict]] = {}
-    for attendance_date, bus_id, bus_name, plate_no, student_id, name, class_name in rows:
+    from routers.student import file_to_dict, reason_text   # 순환 import 방지
+
+    for attendance, bus_id, bus_name, plate_no, student_id, name, class_name in rows:
+        attendance_date = attendance.date
         buses = days.setdefault(attendance_date, {})
         bus = buses.setdefault(
             bus_id,
@@ -114,6 +118,10 @@ def attendance_calendar(
             "name": name,
             "class_name": class_name,
             "is_absent": True,
+            "reason_type": attendance.reason_type,
+            "reason_memo": attendance.reason_memo,
+            "reason_text": reason_text(attendance),
+            "files": [file_to_dict(f) for f in attendance.files],
         })
 
     return {
@@ -130,6 +138,16 @@ def attendance_calendar(
             for attendance_date, buses in sorted(days.items())
         ],
     }
+
+
+@router.get("/attendance/files/{file_id}")
+def admin_attendance_file(file_id: int, db: Session = Depends(get_db)):
+    """관리자: 결석 사유 첨부 파일 보기"""
+    f = db.get(AttendanceFile, file_id)
+    if not f:
+        raise HTTPException(404, "첨부 파일을 찾을 수 없습니다")
+    return Response(content=f.data, media_type=f.content_type,
+                    headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/{bus_id}/students")

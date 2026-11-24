@@ -8,7 +8,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON, Boolean, Column, Date, DateTime, Enum, ForeignKey, Integer, String,
+    JSON, Boolean, Column, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, String,
     Text, UniqueConstraint,
 )
 from sqlalchemy.dialects import mysql
@@ -189,8 +189,32 @@ class Attendance(Base):
     student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False)
     is_absent = Column(Boolean, nullable=False, default=False)
+    # 결석 사유 (학부모 앱 '출석·결석 관리'): SICK / FIELD_TRIP / FAMILY / OTHER + 메모
+    reason_type = Column(String(20), nullable=True)
+    reason_memo = Column(String(500), nullable=True)
 
     student = relationship("Student", back_populates="attendances")
+    files = relationship(
+        "AttendanceFile", back_populates="attendance",
+        cascade="all, delete-orphan", order_by="AttendanceFile.id",
+    )
+
+
+class AttendanceFile(Base):
+    """결석 사유 첨부 파일 (진단서·체험학습 신청서 등) — DB 에 바로 저장"""
+    __tablename__ = "attendance_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    attendance_id = Column(
+        Integer, ForeignKey("attendances.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    file_name = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False, default="application/octet-stream")
+    size = Column(Integer, nullable=False, default=0)
+    data = Column(LargeBinary().with_variant(MEDIUMBLOB, "mysql"), nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    attendance = relationship("Attendance", back_populates="files")
 
 
 # ---------- 버스 ----------

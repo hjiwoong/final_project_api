@@ -116,6 +116,15 @@ def init_db():
             connection.execute(text(
                 "CREATE INDEX ix_users_deletion_requested_at ON users (deletion_requested_at)"
             ))
+        # ---------- 결석 사유 컬럼 추가 ----------
+        attendance_existing = {c["name"] for c in inspect(connection).get_columns("attendances")}
+        for column, column_type in {
+            "reason_type": "VARCHAR(20) NULL",
+            "reason_memo": "VARCHAR(500) NULL",
+        }.items():
+            if column not in attendance_existing:
+                connection.execute(text(f"ALTER TABLE attendances ADD COLUMN {column} {column_type}"))
+
         # ---------- 운행 알림용 notifications 컬럼 추가 ----------
         notification_columns = {
             "trip_id": "INT NULL",
