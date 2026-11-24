@@ -5888,3 +5888,24 @@ html body .dashboard-v2 .dashboard-hero {
 html body #view .trip-record-icon { display: none !important; }
 /* 연결 요청: 이름 첫 글자 동그라미는 연한 노랑으로 차분하게 */
 html body #view .req-avatar { background: #FFF4D6 !important; color: var(--ui-navy) !important; box-shadow: none !important; }
+
+/* ===== 상세 화면 요약 카드 디자인 통일 ===== */
+
+.trip-detail-summary .trip-detail-metric,
+.alert-detail-summary .alert-detail-metric {
+  border-top: 1px solid #dfe5ee !important;
+  text-align: center;
+}
+
+/* 학생·보호자 관리 검색 버튼 */
+body #view form.filters button[type="submit"] {
+  background: #f2b705 !important;
+  border-color: #f2b705 !important;
+  color: #172638 !important;
+  font-weight: 600;
+}
+
+body #view form.filters button[type="submit"]:hover {
+  background: #e5ac00 !important;
+  border-color: #e5ac00 !important;
+}
