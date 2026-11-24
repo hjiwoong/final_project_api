@@ -11,6 +11,7 @@ LLM 요약은 services/llm_service.py, Agent 판단은 services/agent_service.py
 
 import logging
 import os
+from core.time import today_kst
 from datetime import date, datetime
 
 from sqlalchemy.orm import Session
@@ -92,7 +93,7 @@ def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
     if level == AlertLevel.URGENT:
         # 오늘 결석으로 설정한 학생은 버스에 타지 않았으므로 제외
         absent_ids = db.query(Attendance.student_id).filter(
-            Attendance.date == date.today(),
+            Attendance.date == today_kst(),
             Attendance.is_absent.is_(True),
         )
         parents = (
@@ -404,7 +405,7 @@ def create_attendance_notifications(
     )
     who = student.name + (f"({student.class_name})" if student.class_name else "")
     when = f"{day.month}월 {day.day}일({_WEEKDAYS[day.weekday()]})"
-    if day == date.today():
+    if day == today_kst():
         when = "오늘 " + when
     title = "결석 신청" if is_absent else "결석 취소"
     body = (f"{who} · {bus.name if bus else '버스 미배정'} · {when} "
@@ -477,6 +478,7 @@ def send_trip_pushes(notification_ids: list[int]) -> None:
                 row.body or "",
                 row.trip_id,
                 row.event_type or "",
+                row.category or "",
                 token,
             )
             for row in rows
@@ -486,7 +488,7 @@ def send_trip_pushes(notification_ids: list[int]) -> None:
     invalid_tokens = []
     seen = set()
 
-    for notification_id, title, body, trip_id, event_type, token in targets:
+    for notification_id, title, body, trip_id, event_type, category, token in targets:
         if token in seen:
             continue
         seen.add(token)
@@ -504,6 +506,7 @@ def send_trip_pushes(notification_ids: list[int]) -> None:
                         "notification_id": str(notification_id),
                         "trip_id": str(trip_id) if trip_id else "",
                         "event_type": event_type,
+                        "category": category,   # ATTENDANCE 면 앱이 출결 화면을 바로 새로고침
                     },
                     android=messaging.AndroidConfig(
                         priority="high",

@@ -1,5 +1,6 @@
 from datetime import date, datetime
 
+from core.time import today_kst
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile,
 )
@@ -57,7 +58,7 @@ def expected_students(db: Session, bus_id: int) -> int:
         return 0
     absent = (
         db.query(Attendance)
-        .filter(Attendance.student_id.in_(ids), Attendance.date == date.today(),
+        .filter(Attendance.student_id.in_(ids), Attendance.date == today_kst(),
                 Attendance.is_absent.is_(True))
         .count()
     )
@@ -141,7 +142,7 @@ def start_trip(
         if schedule.bus_id != body.bus_id:
             raise HTTPException(400, "버스와 운행 시간표가 일치하지 않습니다.")
 
-        if schedule.service_date != date.today():
+        if schedule.service_date != today_kst():
             raise HTTPException(400, "오늘 날짜의 운행 시간표만 시작할 수 있습니다.")
 
         if schedule.trip_id is not None:
@@ -158,7 +159,7 @@ def start_trip(
             row[0]
             for row in db.query(Attendance.student_id).filter(
                 Attendance.student_id.in_(student_ids),
-                Attendance.date == date.today(),
+                Attendance.date == today_kst(),
                 Attendance.is_absent.is_(True),
             )
         }
@@ -324,7 +325,7 @@ def trip_boarding_map(
         for row in db.query(Attendance.student_id)
         .filter(
             Attendance.student_id.in_(student_ids),
-            Attendance.date == date.today(),
+            Attendance.date == today_kst(),
             Attendance.is_absent.is_(True),
         )
         .all()

@@ -1,9 +1,11 @@
 from datetime import date, datetime, timedelta
+from core.time import today_kst
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.security import require_admin, require_parent_terms_agreed
@@ -41,6 +43,28 @@ _EXT_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", 
               ".webp": "image/webp", ".heic": "image/heic", ".pdf": "application/pdf"}
 
 
+def _shrink_image(data: bytes, content_type: str, name: str) -> tuple[bytes, str, str]:
+    """휴대폰 사진(3~8MB)을 긴 변 1600px JPEG 로 줄인다.
+
+    MySQL max_allowed_packet 이 작으면 큰 사진 저장이 500 으로 실패했다. 못 여는 형식(HEIC 등)은 그대로 둔다."""
+    try:
+        import io
+        from PIL import Image, ImageOps
+        img = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        img.thumbnail((1600, 1600))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85, optimize=True)
+        small = buf.getvalue()
+    except Exception:  # noqa: BLE001
+        return data, content_type, name
+    if len(small) >= len(data) and content_type == "image/jpeg":
+        return data, content_type, name
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    return small, "image/jpeg", f"{stem}.jpg"
+
+
 def file_to_dict(f: AttendanceFile) -> dict:
     return {"file_id": f.id, "file_name": f.file_name, "content_type": f.content_type, "size": f.size}
 
@@ -62,7 +86,7 @@ def _attendance_dict(student_id: int, day: date, a: "Attendance | None") -> dict
         "student_id": student_id,
         "date": day,
         "is_absent": absent,
-        "editable": day >= date.today(),
+        "editable": day >= today_kst(),
         "status": "REQUESTED" if absent else None,   # 앱 표시: 확인 대기
         "reason_type": a.reason_type if absent else None,
         "reason_memo": a.reason_memo if absent else None,
@@ -109,7 +133,7 @@ def my_children(
     db: Session = Depends(get_db),
 ):
     """내 자녀의 날짜별 결석 설정과 배정 버스의 실제 운행 상태"""
-    target_date = attendance_date or date.today()
+    target_date = attendance_date or today_kst()
     rows = (
         db.query(Student)
         .join(Guardian, Guardian.student_id == Student.id)
@@ -254,7 +278,7 @@ def confirm_trip_attendance(
     if not assigned:
         raise HTTPException(404, "해당 운행에 배정된 자녀가 아닙니다")
 
-    trip_date = trip.started_at.date() if trip.started_at else date.today()
+    trip_date = trip.started_at.date() if trip.started_at else today_kst()
     is_absent = (
         db.query(Attendance.id)
         .filter(
@@ -384,15 +408,27 @@ def set_attendance(
     if not is_mine:
         raise HTTPException(403, "내 자녀가 아닙니다")
 
-    a = (
-        db.query(Attendance)
-        .filter(Attendance.student_id == student_id, Attendance.date == body.date)
-        .first()
-    )
-    was_absent = bool(a and a.is_absent)
+    if body.date < today_kst():
+        raise HTTPException(409, "지난 날짜의 출결은 바꿀 수 없어요")
+
+    def current() -> "Attendance | None":
+        return (
+            db.query(Attendance)
+            .filter(Attendance.student_id == student_id, Attendance.date == body.date)
+            .first()
+        )
+
+    a = current()
     if not a:
-        a = Attendance(student_id=student_id, date=body.date)
-        db.add(a)
+        # 같은 날짜로 요청이 거의 동시에 두 번 오면 한쪽이 UNIQUE(student_id, date) 에 걸려 500 이 났다
+        # → 먼저 행을 만들어 두고, 이미 생겼으면 그 행을 다시 읽어 쓴다
+        try:
+            with db.begin_nested():
+                db.add(Attendance(student_id=student_id, date=body.date, is_absent=False))
+        except IntegrityError:
+            pass
+        a = current()
+    was_absent = bool(a.is_absent)
     a.is_absent = body.is_absent
     if body.is_absent:
         # 사유를 보내지 않은 요청(홈 화면 '결석 신청' 버튼)은 기존 사유를 그대로 둔다
@@ -406,7 +442,7 @@ def set_attendance(
         a.files.clear()                     # 결석 취소 → 첨부파일도 삭제
 
     notification_ids: list[int] = []
-    if was_absent != body.is_absent and body.date >= date.today():
+    if was_absent != body.is_absent and body.date >= today_kst():
         student = db.get(Student, student_id)
         if student:
             notification_ids = notifier.create_attendance_notifications(
@@ -502,7 +538,7 @@ async def upload_attendance_file(
         raise HTTPException(404, "결석 기록을 찾을 수 없습니다")
     if not a.is_absent:
         raise HTTPException(409, "결석으로 신청한 날에만 파일을 첨부할 수 있습니다")
-    if a.date < date.today():
+    if a.date < today_kst():
         raise HTTPException(409, "지난 날짜에는 파일을 첨부할 수 없습니다")
     if len(a.files) >= MAX_FILES_PER_ATTENDANCE:
         raise HTTPException(409, f"첨부 파일은 {MAX_FILES_PER_ATTENDANCE}개까지 올릴 수 있습니다")
@@ -520,6 +556,8 @@ async def upload_attendance_file(
         raise HTTPException(400, "빈 파일입니다")
     if len(data) > MAX_FILE_BYTES:
         raise HTTPException(413, "파일이 너무 큽니다 (10MB 이하)")
+    if content_type.startswith("image/"):
+        data, content_type, name = _shrink_image(data, content_type, name)
 
     f = AttendanceFile(attendance_id=a.id, file_name=name, content_type=content_type,
                        size=len(data), data=data)
@@ -557,7 +595,7 @@ def delete_attendance_file(
     f = db.get(AttendanceFile, file_id)
     if not f or f.attendance.student_id != student_id:
         raise HTTPException(404, "첨부 파일을 찾을 수 없습니다")
-    if f.attendance.date < date.today():
+    if f.attendance.date < today_kst():
         raise HTTPException(409, "지난 날짜의 첨부 파일은 지울 수 없습니다")
     db.delete(f)
     db.commit()
