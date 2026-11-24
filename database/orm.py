@@ -68,6 +68,45 @@ def _move_guardian_coordinates_to_students(connection, user_columns: set[str]) -
             connection.execute(text(f"ALTER TABLE users DROP COLUMN {column}"))
 
 
+def _upgrade_attendance_files(connection) -> None:
+    import os
+    import uuid
+
+    from services.attendance_file_storage import UPLOAD_DIR
+
+    columns = {c["name"] for c in inspect(connection).get_columns("attendance_files")}
+    if "original_name" not in columns:
+        connection.execute(text(
+            "ALTER TABLE attendance_files ADD COLUMN original_name VARCHAR(255) NOT NULL DEFAULT ''"
+        ))
+        if "file_name" in columns:
+            connection.execute(text("UPDATE attendance_files SET original_name = file_name"))
+    if "stored_name" not in columns:
+        connection.execute(text("ALTER TABLE attendance_files ADD COLUMN stored_name VARCHAR(64) NULL"))
+    if "uploaded_by" not in columns:
+        connection.execute(text("ALTER TABLE attendance_files ADD COLUMN uploaded_by INT NULL"))
+    if "data" in columns:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        rows = connection.execute(text(
+            "SELECT id, data, stored_name FROM attendance_files"
+        )).mappings().all()
+        for row in rows:
+            stored = row["stored_name"] or uuid.uuid4().hex
+            if row["data"]:
+                with open(os.path.join(UPLOAD_DIR, stored), "wb") as fh:
+                    fh.write(row["data"])
+            connection.execute(
+                text("UPDATE attendance_files SET stored_name = :s WHERE id = :id"),
+                {"s": stored, "id": row["id"]},
+            )
+        connection.execute(text("ALTER TABLE attendance_files DROP COLUMN data"))
+    if "file_name" in columns:
+        connection.execute(text("ALTER TABLE attendance_files DROP COLUMN file_name"))
+    connection.execute(text(
+        "UPDATE attendance_files SET stored_name = REPLACE(UUID(), '-', '') WHERE stored_name IS NULL"
+    ))
+
+
 def init_db():
     """models 를 import 해서 테이블을 MySQL 에 생성 (이미 있으면 건너뜀)"""
     import models.models  # noqa: F401  (테이블 등록용)
@@ -116,14 +155,26 @@ def init_db():
             connection.execute(text(
                 "CREATE INDEX ix_users_deletion_requested_at ON users (deletion_requested_at)"
             ))
-        # ---------- 결석 사유 컬럼 추가 ----------
+        # ---------- 결석 사유·확인 상태 컬럼 (migrations/attendance_v3.sql 과 같은 결과) ----------
         attendance_existing = {c["name"] for c in inspect(connection).get_columns("attendances")}
         for column, column_type in {
-            "reason_type": "VARCHAR(20) NULL",
-            "reason_memo": "VARCHAR(500) NULL",
+            "reason_type": "ENUM('SICK', 'FAMILY', 'FIELD_TRIP', 'OTHER') NULL",
+            "reason_memo": "TEXT NULL",
+            "status": "ENUM('REQUESTED', 'CONFIRMED', 'REJECTED') NULL",
+            "confirmed_by": "INT NULL",
+            "confirmed_at": "DATETIME NULL",
+            "reject_reason": "VARCHAR(200) NULL",
         }.items():
             if column not in attendance_existing:
                 connection.execute(text(f"ALTER TABLE attendances ADD COLUMN {column} {column_type}"))
+        if "status" not in attendance_existing:
+            connection.execute(text(
+                "UPDATE attendances SET status = 'REQUESTED' WHERE is_absent = 1 AND status IS NULL"
+            ))
+
+        # ---------- 결석 첨부 표 (migrations/attendance_files_v1.sql 구조) ----------
+        # 이전 main 패치는 file_name·data(파일 내용을 DB 에) 구조였다 → 파일을 디스크로 옮기고 칸 이름을 맞춘다
+        _upgrade_attendance_files(connection)
 
         # ---------- 운행 알림용 notifications 컬럼 추가 ----------
         notification_columns = {

@@ -99,7 +99,8 @@ def attendance_calendar(
     )
 
     days: dict[date, dict[int, dict]] = {}
-    from routers.student import file_to_dict, reason_text   # 순환 import 방지
+    from routers.student import _reason_code, reason_text   # 순환 import 방지
+    from services.attendance_file_storage import attendance_file_to_dict
 
     for attendance, bus_id, bus_name, plate_no, student_id, name, class_name in rows:
         attendance_date = attendance.date
@@ -118,10 +119,12 @@ def attendance_calendar(
             "name": name,
             "class_name": class_name,
             "is_absent": True,
-            "reason_type": attendance.reason_type,
+            "attendance_id": attendance.id,
+            "status": attendance.status.value if attendance.status else None,
+            "reason_type": _reason_code(attendance),
             "reason_memo": attendance.reason_memo,
             "reason_text": reason_text(attendance),
-            "files": [file_to_dict(f) for f in attendance.files],
+            "files": [attendance_file_to_dict(f) for f in attendance.files],
         })
 
     return {
@@ -143,17 +146,19 @@ def attendance_calendar(
 @router.get("/attendance/files/{file_id}")
 def admin_attendance_file(file_id: int, db: Session = Depends(get_db)):
     """관리자: 결석 사유 첨부 파일 보기"""
+    from routers.attendance_file import _download_response   # 순환 import 방지
+
     f = db.get(AttendanceFile, file_id)
     if not f:
         raise HTTPException(404, "첨부 파일을 찾을 수 없습니다")
-    return Response(content=f.data, media_type=f.content_type,
-                    headers={"Cache-Control": "private, no-store"})
+    return _download_response(f)
 
 
 @router.get("/attendance/{attendance_id}")
 def admin_attendance_detail(attendance_id: int, db: Session = Depends(get_db)):
     """관리자: 결석 알림을 눌렀을 때 — 학생·날짜·사유·첨부 (학부모가 취소했으면 is_absent=false)"""
-    from routers.student import REASON_LABELS, file_to_dict, reason_text   # 순환 import 방지
+    from routers.student import REASON_LABELS, _reason_code, reason_text   # 순환 import 방지
+    from services.attendance_file_storage import attendance_file_to_dict
 
     a = db.get(Attendance, attendance_id)
     if not a:
@@ -171,11 +176,15 @@ def admin_attendance_detail(attendance_id: int, db: Session = Depends(get_db)):
         "is_absent": a.is_absent,
         "student": {"id": s.id, "name": s.name, "class_name": s.class_name} if s else None,
         "bus": {"id": bus.id, "name": bus.name, "plate_no": bus.plate_no} if bus else None,
-        "reason_type": a.reason_type,
-        "reason_label": REASON_LABELS.get(a.reason_type or "", a.reason_type),
+        "reason_type": _reason_code(a),
+        "reason_label": REASON_LABELS.get(_reason_code(a) or "", _reason_code(a)),
         "reason_memo": a.reason_memo,
         "reason_text": reason_text(a),
-        "files": [file_to_dict(f) for f in a.files],
+        "files": [attendance_file_to_dict(f) for f in a.files],
+        # 관리자 확인/반려 (POST /web/attendances/{id}/confirm · /reject)
+        "status": a.status.value if a.status else None,
+        "confirmed_at": a.confirmed_at,
+        "reject_reason": a.reject_reason,
     }
 
 

@@ -8,7 +8,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON, Boolean, Column, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, String,
+    JSON, Boolean, Column, Date, DateTime, Enum, ForeignKey, Integer, String,
     Text, UniqueConstraint,
 )
 from sqlalchemy.dialects import mysql
@@ -71,6 +71,19 @@ class ChildRequestStatus(str, enum.Enum):
     PENDING = "PENDING"      # 관리자 승인 대기
     APPROVED = "APPROVED"    # 승인됨 (guardians 에 연결됨)
     REJECTED = "REJECTED"    # 거절됨
+
+
+class AttendanceReasonType(str, enum.Enum):
+    SICK = "SICK"
+    FAMILY = "FAMILY"
+    FIELD_TRIP = "FIELD_TRIP"
+    OTHER = "OTHER"
+
+
+class AttendanceStatus(str, enum.Enum):
+    REQUESTED = "REQUESTED"
+    CONFIRMED = "CONFIRMED"
+    REJECTED = "REJECTED"
 
 
 # ---------- 계정 ----------
@@ -189,32 +202,57 @@ class Attendance(Base):
     student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False)
     is_absent = Column(Boolean, nullable=False, default=False)
-    # 결석 사유 (학부모 앱 '출석·결석 관리'): SICK / FIELD_TRIP / FAMILY / OTHER + 메모
-    reason_type = Column(String(20), nullable=True)
-    reason_memo = Column(String(500), nullable=True)
+    reason_type = Column(Enum(AttendanceReasonType), nullable=True)
+    reason_memo = Column(Text, nullable=True)
+    status = Column(Enum(AttendanceStatus), nullable=True, index=True)
+    confirmed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    reject_reason = Column(String(200), nullable=True)
 
     student = relationship("Student", back_populates="attendances")
+    confirmer = relationship("User", foreign_keys=[confirmed_by])
     files = relationship(
-        "AttendanceFile", back_populates="attendance",
-        cascade="all, delete-orphan", order_by="AttendanceFile.id",
+        "AttendanceFile",
+        back_populates="attendance",
+        cascade="all, delete-orphan",
+        order_by="AttendanceFile.id",
     )
 
 
 class AttendanceFile(Base):
-    """결석 사유 첨부 파일 (진단서·체험학습 신청서 등) — DB 에 바로 저장"""
     __tablename__ = "attendance_files"
+    __table_args__ = (
+        UniqueConstraint("stored_name", name="uq_attendance_files_stored_name"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     attendance_id = Column(
-        Integer, ForeignKey("attendances.id", ondelete="CASCADE"), nullable=False, index=True,
+        Integer,
+        ForeignKey(
+            "attendances.id",
+            ondelete="CASCADE",
+            name="fk_attendance_files_attendance_id_attendances",
+        ),
+        nullable=False,
+        index=True,
     )
-    file_name = Column(String(255), nullable=False)
-    content_type = Column(String(100), nullable=False, default="application/octet-stream")
-    size = Column(Integer, nullable=False, default=0)
-    data = Column(LargeBinary().with_variant(MEDIUMBLOB, "mysql"), nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
+    stored_name = Column(String(64), nullable=False)
+    original_name = Column(String(255), nullable=False)
+    content_type = Column(String(50), nullable=False)
+    size = Column(Integer, nullable=False)
+    uploaded_by = Column(
+        Integer,
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+            name="fk_attendance_files_uploaded_by_users",
+        ),
+        nullable=True,
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
 
     attendance = relationship("Attendance", back_populates="files")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
 
 
 # ---------- 버스 ----------
@@ -410,6 +448,7 @@ class Notification(Base):
     read_at = Column(DateTime, nullable=True)
 
     alert = relationship("Alert", back_populates="notifications")
+    trip = relationship("Trip")
     user = relationship("User", back_populates="notifications")
 
 class PushToken(Base):

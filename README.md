@@ -176,8 +176,15 @@ python -c "from database.orm import Base; from database.db_connection import eng
 | `GET` | `/me/children` | 현재 내 계정에 연결된 자녀 목록 조회 |
 | `DELETE` | `/me/children/{student_id}` | 해당 자녀와 내 계정의 연결 해제 (성공 시 `204`, 내 자녀가 아니면 `404`) |
 | `GET` | `/me/children/{student_id}/attendance?date=YYYY-MM-DD` | 내 자녀의 해당 날짜 결석 여부 조회 (기록이 없으면 `is_absent: false`) |
-| `PUT` | `/me/children/{student_id}/attendance` | 내 자녀의 해당 날짜 결석 여부 저장 |
+| `PUT` | `/me/children/{student_id}/attendance` | 내 자녀의 해당 날짜 결석 신청·취소 |
+| `GET` | `/me/children/{student_id}/attendances?from=YYYY-MM-DD&to=YYYY-MM-DD` | 내 자녀의 날짜 범위 출결 조회 |
+| `PUT` | `/me/children/{student_id}/attendances/range` | 내 자녀의 날짜 범위 결석 신청·취소 (`from`, `to`, `is_absent`) |
+| `GET` | `/web/attendances?date=YYYY-MM-DD&status=REQUESTED` | 관리자 결석 신청 조회 및 대기 건수 |
+| `POST` | `/web/attendances/{id}/confirm` | 관리자 결석 신청 확인 |
+| `POST` | `/web/attendances/{id}/reject` | 관리자 결석 신청 반려 (`reason`: 1~200자) |
 | `GET` | `/me/buses` | 내 자녀에게 배정된 실제 버스 목록 조회 |
+
+기존 DB에는 `migrations/attendance_v3.sql`을 적용해야 합니다. 결석 신청은 운행 예정 시각 30분 전까지 수정할 수 있으며, `ATTENDANCE_DEADLINE_MINUTES` 환경 변수로 마감 분을 설정할 수 있습니다.
 
 비밀번호 변경 요청은 `{"current_password":"현재 비밀번호","new_password":"새 비밀번호"}` 형식입니다. 새 비밀번호는 가입과 동일하게 4자 이상, 영문 대문자와 특수문자를 포함해야 합니다. 현재 비밀번호가 틀리면 `401`을 반환합니다.
 

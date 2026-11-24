@@ -96,11 +96,11 @@ def check_delayed_trips(now: datetime | None = None) -> None:
                         user_id=user_id,
                         alert_id=None,
                         trip_id=None,
-                        category="TRIP",
+                        category="CHECK",
                         event_type="NOT_STARTED",
-                        title="버스 미출발 알림",
+                        title="버스 미출발",
                         body=(
-                            f"{bus_name}의 "
+                            f"{bus_name} · "
                             f"{schedule.scheduled_at:%H:%M} 예정 운행이 "
                             f"5분 이상 지났으나 출발이 확인되지 않았습니다."
                         ),

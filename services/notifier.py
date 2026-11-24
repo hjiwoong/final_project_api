@@ -11,18 +11,73 @@ LLM 요약은 services/llm_service.py, Agent 판단은 services/agent_service.py
 
 import logging
 import os
-from core.time import today_kst
 from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
+from core.time import now_kst_naive, today_kst
 from database.db_connection import SessionLocal
 from models.models import (
-    Alert, AlertLevel, AlertStatus, Attendance, BoardingEvent, Bus, BusStudent,
+    Alert, AlertLevel, AlertStatus, Attendance, BoardingEvent, BusStudent,
     Guardian, Notification, PushToken, Student, Trip, User, UserRole,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def create_attendance_notifications(
+    db: Session,
+    student: Student,
+    start_date: date,
+    event_type: str,
+    end_date: date | None = None,
+    attendance_id: int | None = None,
+) -> list[int]:
+    """Create privacy-safe attendance notifications for the relevant recipients.
+
+    attendance_id 를 주면 관리자 앱에서 알림을 눌러 사유·첨부를 바로 볼 수 있다(하루짜리 신청)."""
+    titles = {
+        "ABSENCE_REQUESTED": "결석 신청",
+        "ABSENCE_CANCELED": "결석 취소",
+        "ABSENCE_CONFIRMED": "결석 확인됨",
+        "ABSENCE_REJECTED": "결석 반려",
+    }
+    if event_type not in titles:
+        raise ValueError("지원하지 않는 결석 알림 종류입니다.")
+
+    if event_type in ("ABSENCE_REQUESTED", "ABSENCE_CANCELED"):
+        user_ids = {
+            user_id
+            for (user_id,) in db.query(User.id).filter(User.role == UserRole.ADMIN)
+        }
+    else:
+        user_ids = {
+            user_id
+            for (user_id,) in db.query(Guardian.user_id)
+            .filter(Guardian.student_id == student.id)
+        }
+
+    masked_name = (student.name[:1] + "○" * max(len(student.name) - 1, 1))
+    date_text = f"{start_date.month}월 {start_date.day}일"
+    if end_date is not None and end_date != start_date:
+        date_text += f"~{end_date.month}월 {end_date.day}일"
+    body = f"{masked_name} · {date_text}"
+
+    notifications = [
+        Notification(
+            user_id=user_id,
+            category="ATTENDANCE",
+            event_type=event_type,
+            attendance_id=attendance_id,
+            title=titles[event_type],
+            body=body,
+            sent_at=now_kst_naive(),
+        )
+        for user_id in user_ids
+    ]
+    db.add_all(notifications)
+    db.flush()
+    return [notification.id for notification in notifications]
 
 
 def build_summary(boarding: int, remaining: int, level: AlertLevel) -> str:
@@ -55,7 +110,7 @@ def raise_alert(
         db.flush()
         if escalated:
             # 긴급으로 올라가면 아직 알림을 못 받은 보호자에게 알림 추가 (관리자 중복 없음)
-            _notify(db, a, trip, level)
+            _notify(db, a, trip, level, remaining, event.low_conf_count)
         return a
 
     a = Alert(
@@ -67,7 +122,7 @@ def raise_alert(
     )
     db.add(a)
     db.flush()
-    _notify(db, a, trip, level)
+    _notify(db, a, trip, level, remaining, event.low_conf_count)
     return a
 
 
@@ -80,10 +135,18 @@ def resolve_open_alerts(db: Session, trip_id: int, note: str) -> list[Alert]:
     return alerts
 
 
-def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
+def _notify(
+    db: Session, alert: Alert, trip: Trip, level: AlertLevel,
+    remaining: int, low_conf_count: int,
+) -> None:
     bus_name = trip.bus.name if trip.bus else f"{trip.bus_id}번 버스"
-    title = ("🚨 " if level == AlertLevel.URGENT else "⚠️ ") + (alert.message or "경고")
-    body = f"{bus_name} · {alert.llm_summary}"
+    title = alert.message or "경고"
+    if level == AlertLevel.URGENT:
+        event_type = "MISSED"
+    else:
+        event_type = "NEEDS_CHECK"
+    details = " · ".join(filter(None, (alert.message, alert.llm_summary)))
+    body = f"{bus_name} · {details}"
 
     user_ids = {
         u.id
@@ -119,10 +182,11 @@ def _notify(db: Session, alert: Alert, trip: Trip, level: AlertLevel) -> None:
             Notification(
                 alert_id=alert.id,
                 user_id=uid,
+                trip_id=trip.id,
+                category=alert.level.value,
+                event_type=event_type,
                 title=title,
                 body=body,
-                # 앱 알림 탭의 '긴급'/'확인 필요' 구분 (이전엔 모두 URGENT 로 저장됐다)
-                category="URGENT" if level == AlertLevel.URGENT else "CHECK",
             )
         )
 
@@ -335,11 +399,11 @@ def create_trip_notifications(
     bus_name = trip.bus.name if trip.bus else f"{trip.bus_id}번 버스"
 
     if event_type == "STARTED":
-        title = "운행 시작 알림"
-        body = f"{bus_name} 운행이 시작되었습니다."
+        title = "운행 시작"
+        body = f"{bus_name} · 운행이 시작되었습니다."
     else:
-        title = "운행 종료 알림"
-        body = f"{bus_name} 운행이 종료되었습니다."
+        title = "운행 종료"
+        body = f"{bus_name} · 운행이 종료되었습니다."
 
     parent_ids = {
         user_id
@@ -386,57 +450,8 @@ def create_trip_notifications(
     return [notification.id for notification in notifications]
 
 
-_WEEKDAYS = "월화수목금토일"
-
-
-def create_attendance_notifications(
-    db: Session,
-    student: Student,
-    day: date,
-    is_absent: bool,
-    reason: str | None = None,
-    attendance_id: int | None = None,
-) -> list[int]:
-    """학부모가 결석을 신청·취소하면 관리자(기사 포함) 전원에게 알림을 저장한다.
-
-    긴급 경고와 같은 기준(role=ADMIN 전원)으로 보낸다. 푸시는 send_trip_pushes 로 보낸다."""
-    bus = (
-        db.query(Bus)
-        .join(BusStudent, BusStudent.bus_id == Bus.id)
-        .filter(BusStudent.student_id == student.id)
-        .first()
-    )
-    who = student.name + (f"({student.class_name})" if student.class_name else "")
-    when = f"{day.month}월 {day.day}일({_WEEKDAYS[day.weekday()]})"
-    if day == today_kst():
-        when = "오늘 " + when
-    title = "결석 신청" if is_absent else "결석 취소"
-    body = (f"{who} · {bus.name if bus else '버스 미배정'} · {when} "
-            + ("결석 신청했습니다. 탑승 예정 인원에서 빠집니다." if is_absent
-               else "결석을 취소했습니다. 다시 탑승 예정입니다."))
-    if is_absent and reason:
-        body += f" (사유: {reason[:60]})"
-
-    notifications = []
-    for (uid,) in db.query(User.id).filter(User.role == UserRole.ADMIN).all():
-        n = Notification(
-            user_id=uid,
-            alert_id=None,
-            trip_id=None,
-            category="ATTENDANCE",
-            event_type="ABSENT" if is_absent else "ABSENT_CANCELED",
-            attendance_id=attendance_id,
-            title=title,
-            body=body,
-        )
-        db.add(n)
-        notifications.append(n)
-    db.flush()
-    return [n.id for n in notifications]
-
-
 def send_trip_pushes(notification_ids: list[int]) -> None:
-    """DB에 저장된 알림(운행 시작·종료, 결석 신청·취소)을 기기로 전송한다."""
+    """DB에 저장된 운행 알림을 학부모 기기로 전송한다."""
     if not notification_ids:
         return
 

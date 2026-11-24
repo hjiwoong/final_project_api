@@ -1,21 +1,22 @@
 from datetime import date, datetime, timedelta
-from core.time import today_kst
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.security import require_admin, require_parent_terms_agreed
+from core.time import KST, now_kst_naive
 from database.db_connection import get_db
 from routers.location import student_location
-from services import notifier
 from models.models import (
-    Attendance, AttendanceFile, Bus, BusStudent, Guardian, Student, Trip, TripStatus, User,
-    TripStudentAttendance,
+    Attendance, AttendanceReasonType, AttendanceStatus, Bus, BusStudent,
+    Guardian, Student, Trip, TripStatus, User, TripStudentAttendance,
 )
+from services import notifier
+from services.attendance_deadline import get_deadline
+from services.attendance_file_storage import attendance_file_to_dict
 
 router = APIRouter(tags=["학생"])
 
@@ -29,74 +30,58 @@ class StudentCreate(BaseModel):
 class AttendanceSet(BaseModel):
     date: date
     is_absent: bool
-    # 결석 사유 (앱 '출석·결석 관리' 화면) — 결석일 때만 저장, 결석 취소하면 사유·첨부파일도 지운다
-    reason_type: str | None = Field(None, max_length=20)
-    reason_memo: str | None = Field(None, max_length=500)
+    reason_type: AttendanceReasonType | None = None
+    reason_memo: str | None = None
+
+
+class AttendanceRangeSet(BaseModel):
+    from_date: date = Field(alias="from")
+    to_date: date = Field(alias="to")
+    is_absent: bool
+    reason_type: AttendanceReasonType | None = None
+    reason_memo: str | None = None
+
+
+def _attendance_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=KST, microsecond=0).isoformat()
+
+
+def _attendance_status(attendance: Attendance | None) -> str | None:
+    if attendance is None or not attendance.is_absent or attendance.status is None:
+        return None
+    return attendance.status.value
 
 
 REASON_LABELS = {"SICK": "질병", "FIELD_TRIP": "현장체험", "FAMILY": "가족 사유", "OTHER": "기타"}
 
-MAX_FILE_BYTES = 10 * 1024 * 1024          # 첨부 1개 최대 10MB
-MAX_FILES_PER_ATTENDANCE = 5
-ALLOWED_FILE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "application/pdf"}
-_EXT_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
-              ".webp": "image/webp", ".heic": "image/heic", ".pdf": "application/pdf"}
 
-
-def _shrink_image(data: bytes, content_type: str, name: str) -> tuple[bytes, str, str]:
-    """휴대폰 사진(3~8MB)을 긴 변 1600px JPEG 로 줄인다.
-
-    MySQL max_allowed_packet 이 작으면 큰 사진 저장이 500 으로 실패했다. 못 여는 형식(HEIC 등)은 그대로 둔다."""
-    try:
-        import io
-        from PIL import Image, ImageOps
-        img = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        img.thumbnail((1600, 1600))
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85, optimize=True)
-        small = buf.getvalue()
-    except Exception:  # noqa: BLE001
-        return data, content_type, name
-    if len(small) >= len(data) and content_type == "image/jpeg":
-        return data, content_type, name
-    stem = name.rsplit(".", 1)[0] if "." in name else name
-    return small, "image/jpeg", f"{stem}.jpg"
-
-
-def file_to_dict(f: AttendanceFile) -> dict:
-    return {"file_id": f.id, "file_name": f.file_name, "content_type": f.content_type, "size": f.size}
-
-
-def reason_text(a: "Attendance | None") -> str | None:
-    """'질병 · 감기 기운' 처럼 사람이 읽는 사유 (관리자 알림·화면용)"""
-    if not a or not a.is_absent:
+def _reason_code(attendance: Attendance | None) -> str | None:
+    value = attendance.reason_type if attendance else None
+    if value is None:
         return None
-    kind = REASON_LABELS.get(a.reason_type or "", a.reason_type)
-    text = " · ".join(x.strip() for x in (kind, a.reason_memo) if x and x.strip())
+    return value.value if hasattr(value, "value") else str(value)
+
+
+def reason_text(attendance: Attendance | None) -> str | None:
+    """'질병 · 감기 기운' 처럼 사람이 읽는 사유 (관리자 화면용)"""
+    if not attendance or not attendance.is_absent:
+        return None
+    code = _reason_code(attendance)
+    kind = REASON_LABELS.get(code or "", code)
+    text = " · ".join(x.strip() for x in (kind, attendance.reason_memo) if x and x.strip())
     return text or None
 
 
-def _attendance_dict(student_id: int, day: date, a: "Attendance | None") -> dict:
-    """앱 ChildAttendance 형식 — 오늘 이후 날짜만 수정 가능(editable)"""
-    absent = bool(a and a.is_absent)
+def _attendance_extra(attendance: Attendance | None) -> dict:
+    """앱이 쓰는 추가 정보: 결석 기록 ID(첨부 업로드용), 사유"""
+    absent = bool(attendance and attendance.is_absent)
     return {
-        "attendance_id": a.id if a else None,
-        "student_id": student_id,
-        "date": day,
-        "is_absent": absent,
-        "editable": day >= today_kst(),
-        "status": "REQUESTED" if absent else None,   # 앱 표시: 확인 대기
-        "reason_type": a.reason_type if absent else None,
-        "reason_memo": a.reason_memo if absent else None,
-        "files": [file_to_dict(f) for f in a.files] if absent else [],
+        "attendance_id": attendance.id if attendance else None,
+        "reason_type": _reason_code(attendance) if absent else None,
+        "reason_memo": attendance.reason_memo if absent else None,
     }
-
-
-def _my_child_or_403(db: Session, me: User, student_id: int) -> None:
-    if not db.query(Guardian).filter(Guardian.user_id == me.id, Guardian.student_id == student_id).first():
-        raise HTTPException(403, "내 자녀가 아닙니다")
 
 
 class TripAttendanceConfirmation(BaseModel):
@@ -133,7 +118,7 @@ def my_children(
     db: Session = Depends(get_db),
 ):
     """내 자녀의 날짜별 결석 설정과 배정 버스의 실제 운행 상태"""
-    target_date = attendance_date or today_kst()
+    target_date = attendance_date or now_kst_naive().date()
     rows = (
         db.query(Student)
         .join(Guardian, Guardian.student_id == Student.id)
@@ -185,7 +170,7 @@ def my_children(
         )
         .all()
     )
-    absent_by_student = {row.student_id: row.is_absent for row in attendances}
+    attendance_by_student = {row.student_id: row for row in attendances}
     trip_student_attendances = {}
     trip_ids = {trip.id for trip in latest_trip_by_bus.values()}
     if trip_ids:
@@ -224,10 +209,22 @@ def my_children(
             if selected_trip
             else None
         )
+        attendance = attendance_by_student.get(student.id)
+        deadline_at, editable = get_deadline(db, student.id, target_date)
         children.append({
             **student_to_dict(student),
             "location": student_location(student),
-            "is_absent": absent_by_student.get(student.id, False),
+            "is_absent": attendance.is_absent if attendance else False,
+            "attendance": {
+                "status": _attendance_status(attendance),
+                "deadline_at": _attendance_iso(deadline_at),
+                "editable": editable,
+                "files": (
+                    [attendance_file_to_dict(file) for file in attendance.files]
+                    if attendance
+                    else []
+                ),
+            },
             "bus_id": bus["id"] if bus else None,
             "bus_name": bus["name"] if bus else None,
             "bus_status": trip_status,
@@ -278,7 +275,7 @@ def confirm_trip_attendance(
     if not assigned:
         raise HTTPException(404, "해당 운행에 배정된 자녀가 아닙니다")
 
-    trip_date = trip.started_at.date() if trip.started_at else today_kst()
+    trip_date = trip.started_at.date() if trip.started_at else date.today()
     is_absent = (
         db.query(Attendance.id)
         .filter(
@@ -397,9 +394,7 @@ def set_attendance(
     me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
-    """자녀 출석/결석 설정 - 내 자녀가 아니면 403
-
-    결석 여부가 실제로 바뀌면(오늘 이후 날짜) 관리자 앱에 알림을 저장하고 푸시를 보낸다."""
+    """자녀 출석/결석 설정 - 내 자녀가 아니면 403"""
     is_mine = (
         db.query(Guardian)
         .filter(Guardian.user_id == me.id, Guardian.student_id == student_id)
@@ -408,27 +403,11 @@ def set_attendance(
     if not is_mine:
         raise HTTPException(403, "내 자녀가 아닙니다")
 
-    if body.date < today_kst():
-        raise HTTPException(409, "지난 날짜의 출결은 바꿀 수 없어요")
-    if body.is_absent and body.date == today_kst():
-        # 오늘 이미 버스에 탄 기록이 있는데 결석으로 바꾸면 탑승 인원·경고 판단이 어긋난다
-        start = datetime.combine(body.date, datetime.min.time())
-        boarded = (
-            db.query(TripStudentAttendance.id)
-            .join(Trip, Trip.id == TripStudentAttendance.trip_id)
-            .filter(
-                TripStudentAttendance.student_id == student_id,
-                TripStudentAttendance.boarding_confirmed_at.isnot(None),
-                Trip.started_at >= start,
-                Trip.started_at < start + timedelta(days=1),
-                Trip.status == TripStatus.IN_PROGRESS,
-            )
-            .first()
-        )
-        if boarded:
-            raise HTTPException(409, "오늘 이미 버스에 탄 기록이 있어 결석으로 바꿀 수 없어요. 기관에 연락해 주세요")
+    _, editable = get_deadline(db, student_id, body.date)
+    if not editable:
+        raise HTTPException(409, "결석 신청 마감 시간이 지났습니다")
 
-    def current() -> "Attendance | None":
+    def current() -> Attendance | None:
         return (
             db.query(Attendance)
             .filter(Attendance.student_id == student_id, Attendance.date == body.date)
@@ -436,45 +415,162 @@ def set_attendance(
         )
 
     a = current()
-    if not a:
-        # 같은 날짜로 요청이 거의 동시에 두 번 오면 한쪽이 UNIQUE(student_id, date) 에 걸려 500 이 났다
-        # → 먼저 행을 만들어 두고, 이미 생겼으면 그 행을 다시 읽어 쓴다
+    if a is None and body.is_absent:
+        # 같은 날짜 요청이 거의 동시에 오면 UNIQUE(student_id, date) 충돌로 500 이 났다
+        # → 빈 행을 먼저 만들어 두고(이미 생겼으면 그 행을) 아래에서 '기존 행 수정'으로 처리
         try:
             with db.begin_nested():
                 db.add(Attendance(student_id=student_id, date=body.date, is_absent=False))
         except IntegrityError:
             pass
         a = current()
-    was_absent = bool(a.is_absent)
-    a.is_absent = body.is_absent
-    if body.is_absent:
-        # 사유를 보내지 않은 요청(홈 화면 '결석 신청' 버튼)은 기존 사유를 그대로 둔다
-        if body.reason_type is not None:
-            a.reason_type = body.reason_type.strip() or None
-        if body.reason_memo is not None:
-            a.reason_memo = body.reason_memo.strip() or None
-    else:
-        a.reason_type = None
-        a.reason_memo = None
-        a.files.clear()                     # 결석 취소 → 첨부파일도 삭제
-
-    notification_ids: list[int] = []
-    if was_absent != body.is_absent and body.date >= today_kst():
-        student = db.get(Student, student_id)
-        if student:
-            notification_ids = notifier.create_attendance_notifications(
-                db, student, body.date, body.is_absent, reason=reason_text(a),
-                attendance_id=a.id,
-            )
-    db.commit()
-    if notification_ids:
-        background_tasks.add_task(notifier.send_trip_pushes, notification_ids)
-    saved = (
-        db.query(Attendance)
-        .filter(Attendance.student_id == student_id, Attendance.date == body.date)
-        .first()
+    was_absent = bool(a and a.is_absent)
+    should_notify = bool(
+        body.is_absent
+        and (
+            a is None
+            or not a.is_absent
+            or a.status == AttendanceStatus.REJECTED
+        )
     )
-    return _attendance_dict(student_id, body.date, saved)
+    if a:
+        a.is_absent = body.is_absent
+        if body.reason_type is not None:
+            a.reason_type = body.reason_type
+        if body.reason_memo is not None:
+            a.reason_memo = body.reason_memo
+        if body.is_absent and (not a.status or a.status == AttendanceStatus.REJECTED):
+            a.status = AttendanceStatus.REQUESTED
+            a.confirmed_by = None
+            a.confirmed_at = None
+            a.reject_reason = None
+        elif not body.is_absent:
+            a.status = None
+            a.confirmed_by = None
+            a.confirmed_at = None
+            a.reject_reason = None
+    else:
+        a = Attendance(
+            student_id=student_id,
+            date=body.date,
+            is_absent=body.is_absent,
+            reason_type=body.reason_type,
+            reason_memo=body.reason_memo,
+            status=AttendanceStatus.REQUESTED if body.is_absent else None,
+        )
+        db.add(a)
+    db.commit()
+    event = (
+        "ABSENCE_REQUESTED" if should_notify
+        else "ABSENCE_CANCELED" if was_absent and not body.is_absent
+        else None
+    )
+    if event:
+        notification_ids = notifier.create_attendance_notifications(
+            db, a.student, body.date, event, attendance_id=a.id
+        )
+        db.commit()
+        if notification_ids:
+            background_tasks.add_task(notifier.send_trip_pushes, notification_ids)
+    deadline_at, editable = get_deadline(db, student_id, body.date)
+    return {
+        "student_id": student_id,
+        "date": body.date,
+        "is_absent": body.is_absent,
+        **_attendance_extra(a),
+        "status": _attendance_status(a),
+        "files": [attendance_file_to_dict(file) for file in a.files] if a else [],
+        "deadline_at": _attendance_iso(deadline_at),
+        "editable": editable,
+    }
+
+
+@router.put("/me/children/{student_id}/attendances/range")
+def set_attendance_range(
+    student_id: int,
+    body: AttendanceRangeSet,
+    background_tasks: BackgroundTasks,
+    me: User = Depends(require_parent_terms_agreed),
+    db: Session = Depends(get_db),
+):
+    is_mine = db.query(Guardian.id).filter(
+        Guardian.user_id == me.id,
+        Guardian.student_id == student_id,
+    ).first()
+    if not is_mine:
+        raise HTTPException(403, "내 자녀가 아닙니다")
+    if body.from_date > body.to_date:
+        raise HTTPException(422, "시작 날짜는 종료 날짜보다 늦을 수 없습니다")
+
+    dates = []
+    current = body.from_date
+    while current <= body.to_date:
+        _, editable = get_deadline(db, student_id, current)
+        if not editable:
+            raise HTTPException(409, "결석 신청 마감 시간이 지났습니다")
+        dates.append(current)
+        current += timedelta(days=1)
+
+    rows = {
+        row.date: row
+        for row in db.query(Attendance).filter(
+            Attendance.student_id == student_id,
+            Attendance.date.in_(dates),
+        )
+    }
+    notification_dates = []
+    for attendance_date in dates:
+        row = rows.get(attendance_date)
+        if body.is_absent:
+            if row is None:
+                row = Attendance(
+                    student_id=student_id,
+                    date=attendance_date,
+                    is_absent=True,
+                    reason_type=body.reason_type,
+                    reason_memo=body.reason_memo,
+                    status=AttendanceStatus.REQUESTED,
+                )
+                db.add(row)
+                notification_dates.append(attendance_date)
+                continue
+            if not row.is_absent or row.status == AttendanceStatus.REJECTED:
+                notification_dates.append(attendance_date)
+                row.status = AttendanceStatus.REQUESTED
+                row.confirmed_by = None
+                row.confirmed_at = None
+                row.reject_reason = None
+            row.is_absent = True
+            if body.reason_type is not None:
+                row.reason_type = body.reason_type
+            if body.reason_memo is not None:
+                row.reason_memo = body.reason_memo
+        elif row is not None:
+            row.is_absent = False
+            row.status = None
+            row.confirmed_by = None
+            row.confirmed_at = None
+            row.reject_reason = None
+
+    db.commit()
+    if notification_dates:
+        notification_ids = notifier.create_attendance_notifications(
+            db,
+            db.get(Student, student_id),
+            min(notification_dates),
+            "ABSENCE_REQUESTED",
+            max(notification_dates),
+        )
+        db.commit()
+        if notification_ids:
+            background_tasks.add_task(notifier.send_trip_pushes, notification_ids)
+    return {
+        "student_id": student_id,
+        "from": body.from_date,
+        "to": body.to_date,
+        "is_absent": body.is_absent,
+    }
+
 
 @router.get("/me/children/{student_id}/attendance")
 def get_attendance(
@@ -506,114 +602,93 @@ def get_attendance(
         )
         .first()
     )
+    deadline_at, editable = get_deadline(db, student_id, date)
 
-    return _attendance_dict(student_id, date, attendance)
+    return {
+        "student_id": student_id,
+        "date": date,
+        "is_absent": attendance.is_absent if attendance else False,
+        **_attendance_extra(attendance),
+        "status": _attendance_status(attendance),
+        "confirmed_at": _attendance_iso(attendance.confirmed_at if attendance else None),
+        "reject_reason": attendance.reject_reason if attendance else None,
+        "files": (
+            [attendance_file_to_dict(file) for file in attendance.files]
+            if attendance
+            else []
+        ),
+        "deadline_at": _attendance_iso(deadline_at),
+        "editable": editable,
+    }
 
 
 @router.get("/me/children/{student_id}/attendances")
-def list_attendances(
+def get_attendances(
     student_id: int,
-    from_: date = Query(..., alias="from"),
-    to: date = Query(...),
+    from_date: date = Query(alias="from"),
+    to_date: date = Query(alias="to"),
     me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
-    """기간 안의 출결 기록 (앱 '출석·결석 관리' 달력용) - 내 자녀가 아니면 403"""
-    is_mine = (
-        db.query(Guardian)
-        .filter(Guardian.user_id == me.id, Guardian.student_id == student_id)
-        .first()
-    )
+    is_mine = db.query(Guardian.id).filter(
+        Guardian.user_id == me.id,
+        Guardian.student_id == student_id,
+    ).first()
     if not is_mine:
         raise HTTPException(403, "내 자녀가 아닙니다")
-    if (to - from_).days > 400:
-        raise HTTPException(400, "조회 기간이 너무 깁니다")
-    rows = (
-        db.query(Attendance)
-        .filter(
+    if from_date > to_date:
+        raise HTTPException(422, "시작 날짜는 종료 날짜보다 늦을 수 없습니다")
+
+    rows = {
+        row.date: row
+        for row in db.query(Attendance).filter(
             Attendance.student_id == student_id,
-            Attendance.date >= from_,
-            Attendance.date <= to,
+            Attendance.date >= from_date,
+            Attendance.date <= to_date,
         )
-        .order_by(Attendance.date)
-        .all()
-    )
-    return {"items": [_attendance_dict(student_id, a.date, a) for a in rows]}
-
-
-@router.post("/me/attendances/{attendance_id}/files", status_code=201)
-async def upload_attendance_file(
-    attendance_id: int,
-    file: UploadFile = File(...),
-    me: User = Depends(require_parent_terms_agreed),
-    db: Session = Depends(get_db),
-):
-    """결석 사유 첨부 (이미지·PDF, 10MB, 결석 1건당 5개까지) - 내 자녀 결석이 아니면 404"""
-    a = db.get(Attendance, attendance_id)
-    if not a or not db.query(Guardian).filter(
-        Guardian.user_id == me.id, Guardian.student_id == a.student_id,
-    ).first():
-        raise HTTPException(404, "결석 기록을 찾을 수 없습니다")
-    if not a.is_absent:
-        raise HTTPException(409, "결석으로 신청한 날에만 파일을 첨부할 수 있습니다")
-    if a.date < today_kst():
-        raise HTTPException(409, "지난 날짜에는 파일을 첨부할 수 없습니다")
-    if len(a.files) >= MAX_FILES_PER_ATTENDANCE:
-        raise HTTPException(409, f"첨부 파일은 {MAX_FILES_PER_ATTENDANCE}개까지 올릴 수 있습니다")
-
-    name = (file.filename or "첨부파일").replace("\\", "/").split("/")[-1][:255]
-    content_type = (file.content_type or "").lower()
-    if content_type not in ALLOWED_FILE_TYPES:
-        ext = name[name.rfind("."):].lower() if "." in name else ""
-        content_type = _EXT_TYPES.get(ext, "")
-    if content_type not in ALLOWED_FILE_TYPES:
-        raise HTTPException(415, "이미지(JPG·PNG 등)나 PDF 파일만 첨부할 수 있습니다")
-
-    data = await file.read(MAX_FILE_BYTES + 1)
-    if not data:
-        raise HTTPException(400, "빈 파일입니다")
-    if len(data) > MAX_FILE_BYTES:
-        raise HTTPException(413, "파일이 너무 큽니다 (10MB 이하)")
-    if content_type.startswith("image/"):
-        data, content_type, name = _shrink_image(data, content_type, name)
-
-    f = AttendanceFile(attendance_id=a.id, file_name=name, content_type=content_type,
-                       size=len(data), data=data)
-    db.add(f)
-    db.commit()
-    db.refresh(f)
-    return file_to_dict(f)
+    }
+    result = []
+    current = from_date
+    while current <= to_date:
+        attendance = rows.get(current)
+        deadline_at, editable = get_deadline(db, student_id, current)
+        result.append({
+            "student_id": student_id,
+            "date": current.isoformat(),
+            "is_absent": attendance.is_absent if attendance else False,
+            **_attendance_extra(attendance),
+            "status": _attendance_status(attendance),
+            "confirmed_at": _attendance_iso(attendance.confirmed_at if attendance else None),
+            "reject_reason": attendance.reject_reason if attendance else None,
+            "files": (
+                [attendance_file_to_dict(file) for file in attendance.files]
+                if attendance
+                else []
+            ),
+            "deadline_at": _attendance_iso(deadline_at),
+            "editable": editable,
+        })
+        current += timedelta(days=1)
+    return result
 
 
 @router.get("/me/children/{student_id}/attendance/files/{file_id}")
-def download_attendance_file(
+def download_child_attendance_file(
     student_id: int,
     file_id: int,
     me: User = Depends(require_parent_terms_agreed),
     db: Session = Depends(get_db),
 ):
-    """내 자녀의 결석 첨부 파일 내려받기"""
-    _my_child_or_403(db, me, student_id)
-    f = db.get(AttendanceFile, file_id)
-    if not f or f.attendance.student_id != student_id:
-        raise HTTPException(404, "첨부 파일을 찾을 수 없습니다")
-    return Response(content=f.data, media_type=f.content_type,
-                    headers={"Cache-Control": "private, no-store"})
+    """학부모 앱 '출석·결석 관리'의 첨부 보기 (앱이 쓰는 주소). 실제 파일은 attendance_file 과 같은 곳"""
+    from models.models import AttendanceFile
+    from routers.attendance_file import _download_response   # 순환 import 방지
 
-
-@router.delete("/me/children/{student_id}/attendance/files/{file_id}", status_code=204)
-def delete_attendance_file(
-    student_id: int,
-    file_id: int,
-    me: User = Depends(require_parent_terms_agreed),
-    db: Session = Depends(get_db),
-):
-    """내 자녀의 결석 첨부 파일 삭제 (지난 날짜는 불가)"""
-    _my_child_or_403(db, me, student_id)
-    f = db.get(AttendanceFile, file_id)
-    if not f or f.attendance.student_id != student_id:
+    is_mine = db.query(Guardian.id).filter(
+        Guardian.user_id == me.id, Guardian.student_id == student_id,
+    ).first()
+    if not is_mine:
+        raise HTTPException(403, "내 자녀가 아닙니다")
+    file = db.get(AttendanceFile, file_id)
+    if file is None or file.attendance.student_id != student_id:
         raise HTTPException(404, "첨부 파일을 찾을 수 없습니다")
-    if f.attendance.date < today_kst():
-        raise HTTPException(409, "지난 날짜의 첨부 파일은 지울 수 없습니다")
-    db.delete(f)
-    db.commit()
+    return _download_response(file)
