@@ -346,6 +346,62 @@ def trip_boarding_map(
     }
 
 
+# ---------- 기사: 정류장별 승차 확인 ----------
+@router.post("/{trip_id}/students/{student_id}/boarded")
+def mark_student_boarded(
+    trip_id: int,
+    student_id: int,
+    me: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """기사 앱 탑승 지도에서 '승차 완료'를 누르면 그 학생의 승차 시각을 기록한다.
+
+    학부모 앱 홈 '오늘 승하차'·승하차 기록에 이 시각이 나온다 (이미 기록돼 있으면 그대로 둔다)."""
+    t = get_trip_or_404(db, trip_id)
+    if t.status != TripStatus.IN_PROGRESS:
+        raise HTTPException(409, "진행 중인 운행만 승차를 기록할 수 있습니다")
+    assigned = (
+        db.query(BusStudent.id)
+        .filter(BusStudent.bus_id == t.bus_id, BusStudent.student_id == student_id)
+        .first()
+    )
+    if not assigned:
+        raise HTTPException(404, "이 버스에 배정된 학생이 아닙니다")
+    absent = (
+        db.query(Attendance.id)
+        .filter(
+            Attendance.student_id == student_id,
+            Attendance.date == today_kst(),
+            Attendance.is_absent.is_(True),
+        )
+        .first()
+    )
+    if absent:
+        raise HTTPException(409, "오늘 결석으로 신청된 학생입니다")
+
+    att = (
+        db.query(TripStudentAttendance)
+        .filter(
+            TripStudentAttendance.trip_id == t.id,
+            TripStudentAttendance.student_id == student_id,
+        )
+        .first()
+    )
+    if att is None:
+        att = TripStudentAttendance(trip_id=t.id, student_id=student_id)
+        db.add(att)
+    if att.boarding_confirmed_at is None:
+        att.boarding_confirmed_at = datetime.now()
+        att.boarding_confirmed_by = me.id
+    db.commit()
+    return {
+        "trip_id": t.id,
+        "student_id": student_id,
+        "boarding_confirmed_at": att.boarding_confirmed_at,
+        "alighting_confirmed_at": att.alighting_confirmed_at,
+    }
+
+
 # ---------- 승차 사진 ----------
 @router.post("/{trip_id}/boarding-photo")
 async def boarding_photo(
@@ -525,6 +581,7 @@ def confirm_trip(
     trip_id: int,
     body: ConfirmBody,
     background_tasks: BackgroundTasks,
+    me: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """하차 확인 후 운행 종료.
@@ -582,6 +639,14 @@ def confirm_trip(
     t.confirm_method = body.method
     # 시뮬레이션 여부는 운행 시작 시 결정하며 종료 시 변경하지 않는다.
     t.ended_at = datetime.now()
+
+    # 종점에서 안전 확인 후 운행을 끝내면 = 탄 아이들은 모두 내린 것 → 하차 시각 기록
+    # (학부모 앱 '오늘 승하차'의 하차 시각. 보호자가 먼저 하차 확인을 눌렀으면 그 시각을 그대로 둔다)
+    if not t.simulation_mode:
+        for att in t.student_attendances:
+            if att.boarding_confirmed_at and att.alighting_confirmed_at is None:
+                att.alighting_confirmed_at = t.ended_at
+                att.alighting_confirmed_by = me.id
 
     # 운행 종료 알림 생성 (보호자) - 커밋과 같은 트랜잭션
     notification_ids = notifier.create_trip_notifications(db, t, "ENDED")

@@ -410,6 +410,23 @@ def set_attendance(
 
     if body.date < today_kst():
         raise HTTPException(409, "지난 날짜의 출결은 바꿀 수 없어요")
+    if body.is_absent and body.date == today_kst():
+        # 오늘 이미 버스에 탄 기록이 있는데 결석으로 바꾸면 탑승 인원·경고 판단이 어긋난다
+        start = datetime.combine(body.date, datetime.min.time())
+        boarded = (
+            db.query(TripStudentAttendance.id)
+            .join(Trip, Trip.id == TripStudentAttendance.trip_id)
+            .filter(
+                TripStudentAttendance.student_id == student_id,
+                TripStudentAttendance.boarding_confirmed_at.isnot(None),
+                Trip.started_at >= start,
+                Trip.started_at < start + timedelta(days=1),
+                Trip.status == TripStatus.IN_PROGRESS,
+            )
+            .first()
+        )
+        if boarded:
+            raise HTTPException(409, "오늘 이미 버스에 탄 기록이 있어 결석으로 바꿀 수 없어요. 기관에 연락해 주세요")
 
     def current() -> "Attendance | None":
         return (
