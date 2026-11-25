@@ -10,6 +10,8 @@
 - 대상: image_expires_at 이 지난 이벤트
         + image_expires_at 이 비어 있는 예전 이벤트는 uploaded_at 기준으로 기간이 지났으면 삭제
 - 호출: main.py 스케줄러가 서버 시작 직후 1번, 이후 1시간마다
+- 결석 사유 첨부파일(uploads/attendance)도 같은 기간이 지나면 함께 지운다
+  (.env ATTENDANCE_FILE_RETENTION_DAYS, 없으면 IMAGE_RETENTION_DAYS 값)
 """
 import logging
 import os
@@ -18,8 +20,8 @@ from datetime import datetime, timedelta
 from sqlalchemy import and_, or_
 
 from database.db_connection import SessionLocal
-from models.models import BoardingEvent, EventImage
-from services.storage import RETENTION_DAYS, UPLOAD_DIR
+from models.models import Attendance, AttendanceFile, BoardingEvent, EventImage
+from services.storage import RETENTION_DAYS, UPLOAD_DIR, resolve_path
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +93,7 @@ def purge_expired_images(now: datetime | None = None) -> dict:
             cleaned = set(with_db_image)
             for e in events:
                 if e.image_path:
-                    paths.add(e.image_path)
+                    paths.add(resolve_path(e.image_path))
                     e.image_path = None
                     cleaned.add(e.id)
 
@@ -116,9 +118,57 @@ def purge_expired_images(now: datetime | None = None) -> dict:
     return total
 
 
+def purge_expired_attendance_files(now: datetime | None = None) -> dict:
+    """결석 사유 첨부파일(진료확인서 등)도 차량 사진처럼 기간이 지나면 지운다.
+    기준: 결석 날짜와 업로드 시각이 모두 보관 기간(기본 14일)보다 오래된 파일
+    (미리 올려 둔 파일이 결석일 전에 지워지지 않도록 둘 다 본다)
+    결석 기록(날짜·사유)은 남기고 파일과 파일 행만 지운다."""
+    from services import attendance_file_storage as afs
+
+    now = now or datetime.now()
+    days = afs.ATTENDANCE_FILE_RETENTION_DAYS
+    cutoff = now - timedelta(days=days)
+    total = {"files": 0, "rows": 0}
+
+    with SessionLocal() as db:
+        while True:
+            rows = (
+                db.query(AttendanceFile)
+                .join(Attendance, Attendance.id == AttendanceFile.attendance_id)
+                .filter(
+                    AttendanceFile.created_at <= cutoff,
+                    Attendance.date <= cutoff.date(),
+                )
+                .order_by(AttendanceFile.id)
+                .limit(BATCH_SIZE)
+                .all()
+            )
+            if not rows:
+                break
+            paths = [os.path.join(afs.UPLOAD_DIR, r.stored_name) for r in rows if r.stored_name]
+            for r in rows:
+                db.delete(r)
+            db.commit()             # DB 를 먼저 확정한 뒤 파일 삭제
+            total["rows"] += len(rows)
+            for path in paths:
+                if _remove_file(path):
+                    total["files"] += 1
+
+    if total["rows"]:
+        logger.info(
+            "보관 기간(%s일)이 지난 결석 첨부파일 삭제: %s건 (파일 %s개)",
+            days, total["rows"], total["files"],
+        )
+    return total
+
+
 def run_purge_job() -> None:
     """스케줄러용: 실패해도 서버를 멈추지 않는다"""
     try:
         purge_expired_images()
     except Exception:  # noqa: BLE001
         logger.exception("사진 보관 기간 정리 작업 실패")
+    try:
+        purge_expired_attendance_files()
+    except Exception:  # noqa: BLE001
+        logger.exception("결석 첨부파일 보관 기간 정리 작업 실패")

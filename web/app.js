@@ -253,6 +253,8 @@
       home: '<path d="m3 10 9-7 9 7v11h-6v-7H9v7H3z"/>',
       link: '<circle cx="9" cy="7" r="3"/><path d="M3 20v-2a6 6 0 0 1 10-4.5"/><path d="M16 12h3a3 3 0 0 1 0 6h-3m-1-6h-2a3 3 0 0 0 0 6h2m-2-3h5"/>',
       user: '<circle cx="12" cy="7" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2z"/>',
+      calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4m8-4v4M8 14h.01M12 14h.01M16 14h.01M8 17.5h.01M12 17.5h.01"/>',
+      clip: '<path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/>',
       logout: '<path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5M14 8l4 4-4 4m-8-4h12"/>'
     };
     return `<svg class="ui-line-icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.bus}</svg>`;
@@ -262,8 +264,8 @@
     const nav = $('.rail nav');
     if (!nav || nav.dataset.decorated) return;
     nav.dataset.decorated = 'true';
-    const icons = { dashboard: 'home', trips: 'bus', alerts: 'bell', requests: 'link', students: 'user', buses: 'bus' };
-    const names = { dashboard: '대시보드', trips: '운행 관리', alerts: '경고 관리', requests: '연결 요청 관리', students: '학생 · 보호자 관리', buses: '버스 · 배정 관리' };
+    const icons = { dashboard: 'home', attendance: 'calendar', trips: 'bus', alerts: 'bell', requests: 'link', students: 'user', buses: 'bus' };
+    const names = { dashboard: '대시보드', attendance: '출결 관리', trips: '운행 관리', alerts: '경고 관리', requests: '연결 요청 관리', students: '학생 · 보호자 관리', buses: '버스 · 배정 관리' };
     nav.querySelectorAll('a[data-nav]').forEach(a => {
       const key = a.dataset.nav;
       if (!icons[key]) return;
@@ -297,6 +299,177 @@
     }
     const logoutBtn = $('#logout');
     if (logoutBtn) logoutBtn.insertAdjacentHTML('afterbegin', uiIcon('logout', 18));
+  }
+
+  // ======================================================================
+  // 페이지: 출결 관리 (학부모가 등록한 결석 = 바로 결석 반영, 관리자는 조회만)
+  // ======================================================================
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const attState = { year: null, month: null, selected: null, open: new Set() };
+
+  async function attendanceMonth(year, month) {
+    return api('/web/buses/attendance/calendar?' + new URLSearchParams({ year: String(year), month: String(month) }));
+  }
+
+  // 한 학생이 버스 2대에 배정된 경우 같은 결석이 두 번 나오므로 결석 id 로 묶는다
+  function attendanceRows(day) {
+    const byId = new Map();
+    for (const bus of (day?.buses || [])) {
+      for (const st of (bus.students || [])) {
+        const key = st.attendance_id || `${st.id}-${day.date}`;
+        const row = byId.get(key) || { ...st, buses: [] };
+        row.buses.push(bus.bus_name || '버스');
+        byId.set(key, row);
+      }
+    }
+    return [...byId.values()].sort((a, b) =>
+      a.buses[0].localeCompare(b.buses[0], 'ko') || String(a.name).localeCompare(String(b.name), 'ko'));
+  }
+
+  async function openAttendanceFile(fileId) {
+    const win = window.open('', '_blank');      // 팝업 차단을 피하려고 클릭 직후 창부터 연다
+    try {
+      const res = await fetch(`/web/buses/attendance/files/${fileId}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(res.status === 404 ? '파일이 없습니다. 보관 기간이 지나 삭제됐을 수 있어요.' : `파일을 열 수 없습니다 (${res.status})`);
+      const url = URL.createObjectURL(await res.blob());
+      if (win) win.location.href = url; else location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      if (win) win.close();
+      toast(err.message, 'bad');
+    }
+  }
+
+  async function pageAttendance() {
+    const now = new Date();
+    if (!attState.year) { attState.year = now.getFullYear(); attState.month = now.getMonth() + 1; }
+    const todayKey = ymd(now);
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const tomorrowKey = ymd(tomorrow);
+    const { year, month } = attState;
+    const sameMonth = (d) => d.getFullYear() === year && d.getMonth() + 1 === month;
+
+    const months = new Map();
+    const want = [[year, month], [now.getFullYear(), now.getMonth() + 1], [tomorrow.getFullYear(), tomorrow.getMonth() + 1]];
+    await Promise.all(want.map(async ([y, m]) => {
+      const key = `${y}-${m}`;
+      if (!months.has(key)) { months.set(key, null); months.set(key, await attendanceMonth(y, m)); }
+    }));
+    const monthData = months.get(`${year}-${month}`);
+    const dayMap = (data) => new Map((data?.days || []).map((d) => [d.date, d]));
+    const days = dayMap(monthData);
+    const lookup = (d) => dayMap(months.get(`${d.getFullYear()}-${d.getMonth() + 1}`)).get(ymd(d));
+    const todayCount = attendanceRows(lookup(now)).length;
+    const tomorrowCount = attendanceRows(lookup(tomorrow)).length;
+    const monthCount = [...days.values()].reduce((n, d) => n + attendanceRows(d).length, 0);
+
+    if (!attState.selected || !attState.selected.startsWith(`${year}-${String(month).padStart(2, '0')}`)) {
+      attState.selected = sameMonth(now) ? todayKey : (monthData?.days?.[0]?.date || ymd(new Date(year, month - 1, 1)));
+    }
+    const selected = attState.selected;
+    const rows = attendanceRows(days.get(selected));
+
+    const first = new Date(year, month - 1, 1);
+    const lastDay = new Date(year, month, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < first.getDay(); i++) cells.push('<span class="att-day blank"></span>');
+    for (let d = 1; d <= lastDay; d++) {
+      const key = ymd(new Date(year, month - 1, d));
+      const n = attendanceRows(days.get(key)).length;
+      const wd = new Date(year, month - 1, d).getDay();
+      const cls = ['att-day', key === selected ? 'selected' : '', key === todayKey ? 'today' : '', wd === 0 ? 'sun' : wd === 6 ? 'sat' : ''].filter(Boolean).join(' ');
+      cells.push(`<button type="button" class="${cls}" data-att-day="${key}" aria-pressed="${key === selected}" aria-label="${month}월 ${d}일 결석 ${n}명"><span>${d}</span>${n ? `<em>${n}</em>` : ''}</button>`);
+    }
+
+    const selDate = new Date(selected + 'T00:00:00');
+    const selLabel = selDate.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+    const busCounts = {};
+    rows.forEach((r) => r.buses.forEach((b) => { busCounts[b] = (busCounts[b] || 0) + 1; }));
+    const busSummary = Object.entries(busCounts).map(([b, n]) => `${esc(b)} ${n}명`).join(' · ');
+
+    const fileChip = (f) => `<button type="button" class="att-file" data-att-file="${f.id ?? f.file_id}">${uiIcon('clip', 15)}<span>${esc(f.original_name || f.file_name || '첨부파일')}</span></button>`;
+    const item = (r) => {
+      const files = r.files || [];
+      const reason = r.reason_text || '사유 미입력';
+      const memo = (r.reason_memo || '').trim();
+      const label = memo && reason.endsWith(` · ${memo}`) ? reason.slice(0, -(memo.length + 3)) : (memo && reason === memo ? '기타' : reason);
+      const open = attState.open.has(String(r.attendance_id));
+      return `<details class="att-item" data-att-id="${r.attendance_id}" ${open ? 'open' : ''}>
+        <summary>
+          <span class="att-avatar" aria-hidden="true">${esc(String(r.name || '?').slice(0, 1))}</span>
+          <span class="att-main"><strong>${esc(r.name)}</strong><small>${esc([r.class_name, r.buses.join(', ')].filter(Boolean).join(' · '))}</small></span>
+          <span class="att-reason">${esc(reason)}</span>
+          <span class="att-files-count ${files.length ? '' : 'none'}">${uiIcon('clip', 14)}${files.length}</span>
+          <span class="att-chev" aria-hidden="true">›</span>
+        </summary>
+        <div class="att-detail">
+          <dl>
+            <div><dt>사유</dt><dd>${esc(label)}</dd></div>
+            ${memo ? `<div><dt>메모</dt><dd>${esc(memo)}</dd></div>` : ''}
+            <div><dt>첨부</dt><dd>${files.length ? files.map(fileChip).join('') : '<span class="att-muted">첨부파일 없음</span>'}</dd></div>
+          </dl>
+        </div>
+      </details>`;
+    };
+
+    const after = (view) => {
+      view.querySelectorAll('[data-att-day]').forEach((b) => b.addEventListener('click', () => { attState.selected = b.dataset.attDay; route(); }));
+      view.querySelectorAll('[data-att-month]').forEach((b) => b.addEventListener('click', () => {
+        const step = b.dataset.attMonth;
+        if (step === 'today') { attState.year = now.getFullYear(); attState.month = now.getMonth() + 1; attState.selected = todayKey; }
+        else {
+          const d = new Date(year, month - 1 + (step === 'next' ? 1 : -1), 1);
+          attState.year = d.getFullYear(); attState.month = d.getMonth() + 1; attState.selected = null;
+        }
+        route();
+      }));
+      view.querySelectorAll('[data-att-jump]').forEach((b) => b.addEventListener('click', () => {
+        const d = b.dataset.attJump === 'tomorrow' ? tomorrow : now;
+        attState.year = d.getFullYear(); attState.month = d.getMonth() + 1; attState.selected = ymd(d);
+        route();
+      }));
+      view.querySelectorAll('details.att-item').forEach((el) => el.addEventListener('toggle', () => {
+        if (el.open) attState.open.add(el.dataset.attId); else attState.open.delete(el.dataset.attId);
+      }));
+      view.querySelectorAll('[data-att-file]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); openAttendanceFile(b.dataset.attFile); }));
+    };
+
+    return {
+      after,
+      html: `<div class="attendance-page">
+        <header class="pagehead">
+          <div>
+            <h1>출결 관리</h1>
+            <p class="sub">학부모가 등록한 결석을 날짜별로 확인합니다. 등록하면 바로 결석으로 반영돼요.</p>
+          </div>
+        </header>
+        <section class="att-kpis" aria-label="결석 요약">
+          <button type="button" class="att-kpi" data-att-jump="today"><span>오늘 결석</span><strong>${todayCount}<small>명</small></strong></button>
+          <button type="button" class="att-kpi" data-att-jump="tomorrow"><span>내일 결석</span><strong>${tomorrowCount}<small>명</small></strong></button>
+          <div class="att-kpi static"><span>${month}월 결석</span><strong>${monthCount}<small>건</small></strong></div>
+        </section>
+        <div class="att-grid">
+          <section class="att-card att-calendar" aria-label="결석 달력">
+            <div class="att-card-head">
+              <button type="button" class="att-nav" data-att-month="prev" aria-label="이전 달">‹</button>
+              <h2>${year}년 ${month}월</h2>
+              <button type="button" class="att-nav" data-att-month="next" aria-label="다음 달">›</button>
+              ${sameMonth(now) ? '' : '<button type="button" class="btn small" data-att-month="today">이번 달</button>'}
+            </div>
+            <div class="att-week">${['일', '월', '화', '수', '목', '금', '토'].map((w) => `<span>${w}</span>`).join('')}</div>
+            <div class="att-days">${cells.join('')}</div>
+            <p class="att-legend"><em>2</em> 숫자는 그날 결석 인원</p>
+          </section>
+          <section class="att-card att-list" aria-label="선택한 날짜의 결석">
+            <div class="att-card-head">
+              <h2>${esc(selLabel)} 결석 <span>${rows.length}명</span></h2>
+              ${busSummary ? `<span class="badge muted">${busSummary}</span>` : ''}
+            </div>
+            ${rows.length ? rows.map(item).join('') : '<div class="att-empty"><span aria-hidden="true">✓</span><strong>결석 없음</strong><small>이 날은 등록된 결석이 없어요.</small></div>'}
+          </section>
+        </div>
+      </div>`
+    };
   }
 
   async function pageDashboard() {
@@ -438,8 +611,12 @@
     return {
       after,
       html: `<div class="dashboard-v2">
-        <header class="dashboard-hero">
-          <div class="dashboard-hero-copy"><p class="dashboard-date">${esc(dateLabel)}</p><h1>대시보드</h1><p class="sub">${esc(heroLine)}</p><p class="dashboard-scope">${esc(scope)} 기준</p></div><div class="dashboard-hero-art" aria-hidden="true"><img src="./tonghaki_side_bus.svg" alt=""></div>
+        <header class="pagehead dashboard-pagehead">
+          <div>
+            <h1>대시보드</h1>
+            <p class="sub">${esc(dateLabel)} · ${esc(heroLine)}</p>
+          </div>
+          <span class="badge muted">${esc(scope)} 기준</span>
         </header>
         <section class="dashboard-kpis" aria-label="핵심 안전 현황">
           ${kpi('buses', 'blue', '운행 중인 버스', activeBusCount, '대', '현재 진행 중인 운행 기록 기준', uiIcon('bus', 30))}
@@ -3174,6 +3351,7 @@
   // ======================================================================
   const routes = [
     [/^#\/dashboard$/, pageDashboard, 'dashboard'],
+    [/^#\/attendance$/, pageAttendance, 'attendance'],
     [/^#\/trips$/, pageTrips, 'trips'],
     [/^#\/trips\/(\d+)$/, pageTripDetail, 'trips'],
     [/^#\/alerts$/, pageAlerts, 'alerts'],
@@ -3247,6 +3425,19 @@
 
     } catch {
       /* 배지 조회 실패 시 다른 화면 기능은 유지 */
+    }
+
+    try {
+      const now = new Date();
+      const cal = await attendanceMonth(now.getFullYear(), now.getMonth() + 1);
+      const today = (cal.days || []).find((d) => d.date === ymd(now));
+      const n = attendanceRows(today).length;
+      const el = $('#nav-attendance-count');
+      el.textContent = n;
+      el.hidden = n === 0;
+      el.title = `오늘 결석 ${n}명`;
+    } catch {
+      /* 출결 배지 조회 실패는 무시 */
     }
 
     try {

@@ -1,7 +1,15 @@
 from models.models import AttendanceFile
 
 
-UPLOAD_DIR = "uploads/attendance"
+import os
+
+from services.storage import UPLOAD_DIR as _BASE_UPLOAD_DIR
+
+UPLOAD_DIR = os.path.join(_BASE_UPLOAD_DIR, "attendance")
+# 결석 첨부파일도 차량 사진과 같은 기간(IMAGE_RETENTION_DAYS, 기본 14일)만 보관
+ATTENDANCE_FILE_RETENTION_DAYS = int(
+    os.getenv("ATTENDANCE_FILE_RETENTION_DAYS", os.getenv("IMAGE_RETENTION_DAYS", "14"))
+)
 MAX_FILE_SIZE = 5 * 1024 * 1024
 MAX_FILES_PER_ATTENDANCE = 3
 

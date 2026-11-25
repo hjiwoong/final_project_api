@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261123c">
+  <link rel="stylesheet" href="style.css?v=20261125a">
   <style>
     .login-password-wrap { display: block; position: relative; width: 100%; }
     .login-password-wrap input { width: 100%; box-sizing: border-box; padding-right: 52px; }
@@ -53,11 +53,12 @@
 
 <div id="app" class="app" hidden>
   <aside class="rail">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="rail-brand-name">통학버스 안전관리</span></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="rail-brand-title"><strong>통학이</strong><small>관리자 · 통학버스 안전관리</small></span></div>
     <nav aria-label="주 메뉴">
       <a href="#/dashboard" data-nav="dashboard">대시보드</a>
-      <a href="#/trips" data-nav="trips">운행</a>
+      <a href="#/attendance" data-nav="attendance">출결 관리 <span id="nav-attendance-count" class="count" hidden>0</span></a>
       <a href="#/alerts" data-nav="alerts">경고 <span id="nav-alert-count" class="count" hidden>0</span></a>
+      <a href="#/trips" data-nav="trips">운행</a>
       <a href="#/requests" data-nav="requests">연결 요청 <span id="nav-request-count" class="count" hidden>0</span></a>
       <a href="#/students" data-nav="students">학생·보호자</a>
       <a href="#/buses" data-nav="buses">버스·배정</a>
@@ -125,6 +126,6 @@
     });
   })();
 </script>
-<script src="app.js?v=20261123c"></script>
+<script src="app.js?v=20261125a"></script>
 </body>
 </html>

@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from models.models import BoardingEvent, EventImage
+from services.storage import resolve_path
 
 
 def event_image_response(event: BoardingEvent, db: Session):
@@ -19,7 +20,8 @@ def event_image_response(event: BoardingEvent, db: Session):
             media_type=saved_image.content_type,
         )
 
-    if event.image_path and os.path.exists(event.image_path):
-        return FileResponse(event.image_path)
+    path = resolve_path(event.image_path)
+    if path and os.path.exists(path):
+        return FileResponse(path)
 
     raise HTTPException(410, "사진 파일을 찾을 수 없습니다.")

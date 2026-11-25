@@ -66,6 +66,8 @@ def _position(bbox: list[float], width: float, height: float) -> str:
 
 
 def _image_size(image_path: str | None, detections: list[dict]) -> tuple[float, float]:
+    from services.storage import resolve_path
+    image_path = resolve_path(image_path)
     if image_path and os.path.exists(image_path):
         try:
             from PIL import Image, ImageOps
@@ -239,8 +241,10 @@ def enrich_alert_summary(alert_id: int, brightness: float | None = None) -> None
                 low_conf_threshold=LOW_CONF_THRESHOLD, brightness=brightness,
             )
             image_bytes = None
-            if SEND_IMAGE and ev and ev.image_path and os.path.exists(ev.image_path):
-                with open(ev.image_path, "rb") as f:
+            from services.storage import resolve_path
+            img_path = resolve_path(ev.image_path) if ev else None
+            if SEND_IMAGE and img_path and os.path.exists(img_path):
+                with open(img_path, "rb") as f:
                     image_bytes = f.read()
             a.llm_summary = summarize(facts, image_bytes)
             db.commit()
