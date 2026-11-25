@@ -1,3 +1,4 @@
+import os
 from datetime import date, datetime, timedelta
 from typing import Literal
 
@@ -52,6 +53,47 @@ def _attendance_status(attendance: Attendance | None) -> str | None:
     if attendance is None or not attendance.is_absent or attendance.status is None:
         return None
     return attendance.status.value
+
+
+# 한 달에 결석할 수 있는 날 수 (학부모 앱에서 결석 등록은 즉시 반영되므로 남용 방지)
+
+MONTHLY_ABSENCE_LIMIT = int(os.getenv("MONTHLY_ABSENCE_LIMIT", "4"))
+
+
+def _month_bounds(d: date) -> tuple[date, date]:
+    start = d.replace(day=1)
+    end = date(start.year + start.month // 12, start.month % 12 + 1, 1)
+    return start, end
+
+
+def monthly_absence_used(db: Session, student_id: int, d: date, exclude: set[date] | None = None) -> int:
+    """그 달에 이미 결석으로 등록된 날 수 (exclude 날짜는 빼고 센다)"""
+    start, end = _month_bounds(d)
+    q = db.query(Attendance.date).filter(
+        Attendance.student_id == student_id,
+        Attendance.is_absent.is_(True),
+        Attendance.date >= start,
+        Attendance.date < end,
+    )
+    return sum(1 for (day,) in q if not exclude or day not in exclude)
+
+
+def _limit_message(d: date) -> str:
+    return (
+        f"{d.month}월에는 이미 결석을 {MONTHLY_ABSENCE_LIMIT}번 신청해서 더 이상 결석할 수 없어요. "
+        "꼭 결석해야 하면 기관에 연락해 주세요."
+    )
+
+
+def check_monthly_absence_limit(db: Session, student_id: int, new_dates: list[date]) -> None:
+    """새로 결석으로 바꿀 날짜들을 더하면 달마다 한도를 넘는지 확인 → 넘으면 409"""
+    by_month: dict[tuple[int, int], list[date]] = {}
+    for d in new_dates:
+        by_month.setdefault((d.year, d.month), []).append(d)
+    for days in by_month.values():
+        used = monthly_absence_used(db, student_id, days[0], exclude=set(days))
+        if used + len(days) > MONTHLY_ABSENCE_LIMIT:
+            raise HTTPException(409, _limit_message(days[0]))
 
 
 REASON_LABELS = {"SICK": "질병", "FIELD_TRIP": "현장체험", "FAMILY": "가족 사유", "OTHER": "기타"}
@@ -415,6 +457,8 @@ def set_attendance(
         )
 
     a = current()
+    if body.is_absent and not (a and a.is_absent):
+        check_monthly_absence_limit(db, student_id, [body.date])
     if a is None and body.is_absent:
         # 같은 날짜 요청이 거의 동시에 오면 UNIQUE(student_id, date) 충돌로 500 이 났다
         # → 빈 행을 먼저 만들어 두고(이미 생겼으면 그 행을) 아래에서 '기존 행 수정'으로 처리
@@ -518,6 +562,11 @@ def set_attendance_range(
             Attendance.date.in_(dates),
         )
     }
+    if body.is_absent:
+        check_monthly_absence_limit(
+            db, student_id,
+            [d for d in dates if not (rows.get(d) and rows[d].is_absent)],
+        )
     notification_dates = []
     for attendance_date in dates:
         row = rows.get(attendance_date)
@@ -569,6 +618,38 @@ def set_attendance_range(
         "from": body.from_date,
         "to": body.to_date,
         "is_absent": body.is_absent,
+    }
+
+
+@router.get("/me/children/{student_id}/absence-limit")
+def get_absence_limit(
+    student_id: int,
+    date: date,
+    me: User = Depends(require_parent_terms_agreed),
+    db: Session = Depends(get_db),
+):
+    """그 날짜가 속한 달의 결석 한도·사용 횟수 (앱이 결석 신청 전에 확인)"""
+    is_mine = db.query(Guardian.id).filter(
+        Guardian.user_id == me.id, Guardian.student_id == student_id
+    ).first()
+    if not is_mine:
+        raise HTTPException(403, "내 자녀가 아닙니다")
+    used = monthly_absence_used(db, student_id, date)
+    already = db.query(Attendance.id).filter(
+        Attendance.student_id == student_id,
+        Attendance.date == date,
+        Attendance.is_absent.is_(True),
+    ).first() is not None
+    can_request = already or used < MONTHLY_ABSENCE_LIMIT
+    return {
+        "student_id": student_id,
+        "year": date.year,
+        "month": date.month,
+        "limit": MONTHLY_ABSENCE_LIMIT,
+        "used": used,
+        "remaining": max(MONTHLY_ABSENCE_LIMIT - used, 0),
+        "can_request": can_request,
+        "message": None if can_request else _limit_message(date),
     }
 
 
