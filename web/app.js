@@ -611,12 +611,8 @@
     return {
       after,
       html: `<div class="dashboard-v2">
-        <header class="pagehead dashboard-pagehead">
-          <div>
-            <h1>대시보드</h1>
-            <p class="sub">${esc(dateLabel)} · ${esc(heroLine)}</p>
-          </div>
-          <span class="badge muted">${esc(scope)} 기준</span>
+        <header class="dashboard-hero">
+          <div class="dashboard-hero-copy"><p class="dashboard-date">${esc(dateLabel)}</p><h1>대시보드</h1><p class="sub">${esc(heroLine)}</p><p class="dashboard-scope">${esc(scope)} 기준</p></div><div class="dashboard-hero-art" aria-hidden="true"><img src="./tonghaki_side_bus.svg" alt=""></div>
         </header>
         <section class="dashboard-kpis" aria-label="핵심 안전 현황">
           ${kpi('buses', 'blue', '운행 중인 버스', activeBusCount, '대', '현재 진행 중인 운행 기록 기준', uiIcon('bus', 30))}
