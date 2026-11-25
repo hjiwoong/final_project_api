@@ -451,8 +451,8 @@
         <div class="att-grid">
           <section class="att-card att-calendar" aria-label="결석 달력">
             <div class="att-card-head">
-              <button type="button" class="btn small" data-att-month="today" ${sameMonth(now) ? 'style="visibility:hidden" tabindex="-1" aria-hidden="true"' : ''}>이번 달</button>
               <button type="button" class="att-nav" data-att-month="prev" aria-label="이전 달">‹</button>
+              ${sameMonth(now) ? '' : '<button type="button" class="btn small" data-att-month="today">이번 달</button>'}
               <h2>${year}년 ${month}월</h2>
               <button type="button" class="att-nav" data-att-month="next" aria-label="다음 달">›</button>
             </div>
