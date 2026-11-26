@@ -182,7 +182,7 @@ python -c "from database.orm import Base; from database.db_connection import eng
 | `GET` | `/web/attendances?date=YYYY-MM-DD` | 관리자 날짜별 결석 목록 조회 (학부모가 신청하면 바로 결석으로 적용되며, 별도 확인·반려 절차는 없음) |
 | `GET` | `/me/buses` | 내 자녀에게 배정된 실제 버스 목록 조회 |
 
-기존 DB에는 `migrations/attendance_v3.sql`을 적용해야 합니다. 결석 신청은 운행 예정 시각 30분 전까지 수정할 수 있으며, `ATTENDANCE_DEADLINE_MINUTES` 환경 변수로 마감 분을 설정할 수 있습니다.
+기존 DB에는 `migrations/attendance_v3.sql`을 적용해야 합니다. 주말(토·일)은 통학버스 운행이 없어 결석 신청을 받지 않으며(`422`), 기간 신청에서는 주말을 건너뜁니다. 결석 신청은 운행 예정 시각 30분 전까지 수정할 수 있으며, `ATTENDANCE_DEADLINE_MINUTES` 환경 변수로 마감 분을 설정할 수 있습니다.
 
 비밀번호 변경 요청은 `{"current_password":"현재 비밀번호","new_password":"새 비밀번호"}` 형식입니다. 새 비밀번호는 가입과 동일하게 4자 이상, 영문 대문자와 특수문자를 포함해야 합니다. 현재 비밀번호가 틀리면 `401`을 반환합니다.
 

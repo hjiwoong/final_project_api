@@ -154,6 +154,19 @@ class AttendanceWorkflowTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 409)
 
+    def test_weekend_absence_is_rejected(self):
+        # 2026-11-28 은 토요일
+        response = self.client.put(
+            f"/me/children/{self.student.id}/attendance",
+            json={"date": "2026-11-28", "is_absent": True},
+        )
+        self.assertEqual(response.status_code, 422)
+        response = self.client.put(
+            f"/me/children/{self.student.id}/attendances/range",
+            json={"from": "2026-11-28", "to": "2026-11-29", "is_absent": True},
+        )
+        self.assertEqual(response.status_code, 422)
+
     def test_parent_cannot_read_another_guardians_attendance(self):
         response = self.client.get(
             f"/me/children/{self.other_student.id}/attendance",
@@ -168,7 +181,7 @@ class AttendanceWorkflowTests(unittest.TestCase):
                 f"/me/children/{self.student.id}/attendances/range",
                 json={
                     "from": "2026-11-27",
-                    "to": "2026-11-28",
+                    "to": "2026-11-30",
                     "is_absent": True,
                     "reason_type": "FAMILY",
                     "reason_memo": "범위 사유",
@@ -179,16 +192,26 @@ class AttendanceWorkflowTests(unittest.TestCase):
             self.db.query(Attendance)
             .filter(
                 Attendance.student_id == self.student.id,
-                Attendance.date.in_([date(2026, 11, 27), date(2026, 11, 28)]),
+                Attendance.date.in_([date(2026, 11, 27), date(2026, 11, 30)]),
             )
             .count(),
             2,
+        )
+        # 금~월 기간 신청이면 토·일(28·29일)은 건너뛴다
+        self.assertEqual(
+            self.db.query(Attendance)
+            .filter(
+                Attendance.student_id == self.student.id,
+                Attendance.date.in_([date(2026, 11, 28), date(2026, 11, 29)]),
+            )
+            .count(),
+            0,
         )
         notices = self.db.query(Notification).filter_by(
             event_type="ABSENCE_REQUESTED"
         ).all()
         self.assertEqual(len(notices), 1)
-        self.assertEqual(notices[0].body, "강○○ · 11월 27일~11월 28일")
+        self.assertEqual(notices[0].body, "강○○ · 11월 27일~11월 30일")
 
     def test_parent_attendance_views_include_status_and_deadline(self):
         row = Attendance(

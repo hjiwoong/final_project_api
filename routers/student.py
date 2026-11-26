@@ -138,6 +138,14 @@ def student_to_dict(s: Student) -> dict:
 
 
 # ---------- 관리자 전용 ----------
+WEEKEND_ABSENCE_MESSAGE = "주말은 통학버스 운행이 없어 결석 신청을 할 수 없습니다"
+
+
+def _is_weekend(target_date) -> bool:
+    """토요일(5)·일요일(6)"""
+    return target_date.weekday() >= 5
+
+
 @router.post("/web/students", status_code=201, dependencies=[Depends(require_admin)])
 def create_student(body: StudentCreate, db: Session = Depends(get_db)):
     s = Student(**body.model_dump())
@@ -445,6 +453,10 @@ def set_attendance(
     if not is_mine:
         raise HTTPException(403, "내 자녀가 아닙니다")
 
+    # 주말(토·일)은 통학버스 운행이 없어 결석 신청을 받지 않는다 (취소는 허용)
+    if body.is_absent and _is_weekend(body.date):
+        raise HTTPException(422, WEEKEND_ABSENCE_MESSAGE)
+
     _, editable = get_deadline(db, student_id, body.date)
     if not editable:
         raise HTTPException(409, "결석 신청 마감 시간이 지났습니다")
@@ -549,11 +561,17 @@ def set_attendance_range(
     dates = []
     current = body.from_date
     while current <= body.to_date:
+        # 기간 결석 신청은 주말을 건너뛴다 (주말이 한 달 결석 한도를 차지하지 않게)
+        if body.is_absent and _is_weekend(current):
+            current += timedelta(days=1)
+            continue
         _, editable = get_deadline(db, student_id, current)
         if not editable:
             raise HTTPException(409, "결석 신청 마감 시간이 지났습니다")
         dates.append(current)
         current += timedelta(days=1)
+    if not dates:
+        raise HTTPException(422, WEEKEND_ABSENCE_MESSAGE)
 
     rows = {
         row.date: row
