@@ -61,7 +61,7 @@ YOLO_MODELS = MODEL_CANDIDATES
 DETECTOR_TIMEOUT_SEC = float(os.getenv("DETECTOR_TIMEOUT_SEC", "12"))
 
 
-CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.25"))          # 이 이상만 사람으로 셈
+CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD", "0.1"))           # 이 이상만 사람으로 셈 (교차검증으로 고른 값)
 LOW_CONF_THRESHOLD = float(os.getenv("LOW_CONF_THRESHOLD", "0.5"))   # 이 미만이면 '신뢰도 낮음'
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.5"))             # 붙어 앉은 사람이 하나로 합쳐지면 올림
 IMG_SIZE = int(os.getenv("IMG_SIZE", "640"))                         # 사람이 작게 찍히면 960~1280

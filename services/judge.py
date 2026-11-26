@@ -2,7 +2,7 @@
 
 검출된 사람은 신뢰도에 따라 두 종류로 나뉜다.
   - 확실한 검출 : conf >= LOW_CONF_THRESHOLD (.env, 기본 0.5)
-  - 약한 검출   : CONF_THRESHOLD <= conf < LOW_CONF_THRESHOLD   (예: 0.2 ~ 0.5)
+  - 약한 검출   : CONF_THRESHOLD <= conf < LOW_CONF_THRESHOLD   (예: 0.1 ~ 0.5)
 
 종점 잔류 인원(remaining_count) 중
   확실한 잔류 1명 이상            -> MISSED      (긴급: 미하차 의심)

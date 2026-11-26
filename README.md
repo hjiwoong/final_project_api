@@ -100,7 +100,7 @@ seed_admin.py         첫 관리자 계정 생성 스크립트
 | 위치 | `NAVER_MAPS_CLIENT_ID`, `NAVER_MAPS_CLIENT_SECRET`, `NAVER_SEARCH_CLIENT_ID`, `NAVER_SEARCH_CLIENT_SECRET` | 네이버 Geocoding·지역 검색 API 키 |
 | 인원 감지 | `DETECTOR_MODE` | `real` 실제 추론 / `mock` 시연용 가짜 결과 (`real`) |
 | 인원 감지 | `YOLO_MODEL` / `YOLO_MODELS` | 사용할 모델 경로. 서비스는 `YOLO_MODEL`에 k5 하나 (아래 '사람 검출 모델' 참고) |
-| 인원 감지 | `CONF_THRESHOLD`, `LOW_CONF_THRESHOLD`, `IOU_THRESHOLD`, `IMG_SIZE`, `DETECTOR_TIMEOUT_SEC` | 사람 판정 신뢰도(`0.25`), 신뢰도 낮음 기준(`0.5`), 박스 병합 IoU(`0.5`), 입력 크기(`640`), 추론 제한 시간(`12`초) |
+| 인원 감지 | `CONF_THRESHOLD`, `LOW_CONF_THRESHOLD`, `IOU_THRESHOLD`, `IMG_SIZE`, `DETECTOR_TIMEOUT_SEC` | 사람 판정 신뢰도(`0.1`, 교차검증으로 선택), 신뢰도 낮음 기준(`0.5`), 박스 병합 IoU(`0.5`), 입력 크기(`640`), 추론 제한 시간(`12`초) |
 | 사진 | `UPLOAD_DIR`, `IMAGE_RETENTION_DAYS` | 사진 저장 폴더(`uploads`), 보관 기간(`14`일) |
 | 푸시 | `FIREBASE_SERVICE_ACCOUNT_FILE` 또는 `GOOGLE_APPLICATION_CREDENTIALS`, `FCM_ANDROID_CHANNEL_ID` | Firebase 서비스 계정 JSON 경로, Android 알림 채널(`safety_alerts`) |
 | AI | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_EMBED_MODEL`, `LLM_ENABLED`, `LLM_SEND_IMAGE`, `RAG_ENABLED`, `CHAT_ENABLED`, `AGENT_LLM_GUIDANCE`, `AGENT_ESCALATE_DARK`, `DARK_BRIGHTNESS_THRESHOLD` | 'AI 연계' 절 참고 |
